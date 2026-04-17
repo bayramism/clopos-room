@@ -105,18 +105,38 @@ with tab1:
         df_base = get_db(curr, cat)
         if df_base is not None:
             df_c = pd.read_excel(cek)
-            df_base.columns = df_base.columns.str.strip()
+            # DİQQƏT: Bazadakı sütun adlarını kiçik hərflə çağırırıq
             final_list = []
             for _, row in df_c.iterrows():
                 try:
-                    o_name, o_qty, o_prc = str(row['Ad']), float(row['Miqdar']), float(row['1 Vahid, ₼'])
+                    # Sklad çekindəki sütun adları (Excel-də necədirsə elə qalır)
+                    o_name = str(row['Ad'])
+                    o_qty = float(row['Miqdar'])
+                    o_prc = float(row['1 Vahid, ₼'])
+                    
                     p_name, p_qty, fct = apply_special_logic(o_name, o_qty)
                     cost = (o_prc / o_qty) / fct if o_qty != 0 else 0
-                    m_name, _ = get_best_match(p_name, df_base['Ad'].tolist())
+                    
+                    # df_base['ad'] - burada 'ad' KİÇİK hərflə olmalıdır (get_db-də belə etmisən)
+                    m_name, _ = get_best_match(p_name, df_base['ad'].tolist())
+                    
                     if m_name:
-                        mid = df_base[df_base['Ad'] == m_name]['id'].values[0]
+                        # df_base['id'] - burada 'id' KİÇİK hərflə olmalıdır
+                        mid = df_base[df_base['ad'] == m_name]['id'].values[0]
                         final_list.append({'ID': int(mid), 'QUANTITY': p_qty, 'COST': round(cost, 4)})
-                except: continue
+                except Exception as e:
+                    continue
+            
+            if final_list:
+                res_df = pd.DataFrame(final_list).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
+                st.dataframe(res_df, use_container_width=True)
+                buf = io.BytesIO()
+                res_df.to_excel(buf, index=False)
+                st.download_button("📥 Endir", buf.getvalue(), f"{curr}_{cat}_{datetime.now().strftime('%Y%m%d')}.xlsx")
+            else:
+                st.warning("Heç bir məhsul eyniləşdirilmədi. Bazadakı adlarla çekdəki adlar uyğun gəlmir.")
+        else:
+            st.error(f"⚠️ {curr} üçün {cat} bazası tapılmadı!")
             
             if final_list:
                 res_df = pd.DataFrame(final_list).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
