@@ -101,80 +101,69 @@ for res in ["ROOM", "BİBLİOTEKA", "FİNESTRA"]:
 
 curr = st.session_state.selected_res
 
-# --- ANALİZ VƏ KONTROL SAHƏSİ (BİRGƏ) ---
-st.markdown(f"### 📊 {curr} - Məhsul Analizi")
-
+# --- 1. SAHƏ: GİRİŞ VƏ FAYL YÜKLƏMƏ ---
+st.markdown(f"### 📊 {curr} - Analiz Paneli")
 col1, col2 = st.columns(2)
 cat = col1.selectbox("Analiz Sahəsi:", ["Horeca", "Dark Kitchen"])
-cek_file = col2.file_uploader("Sklad Çekini (Excel) Yüklə", type=["xlsx"])
+cek_file = col2.file_uploader("Sklad Çekini Yüklə", type=["xlsx"])
 
+# --- 2. SAHƏ: ANALİZ MOTORU (TOXUNULMAZ HİSSƏ) ---
 if cek_file and st.button("⚡ Analizi Başlat"):
     df_base = get_db(curr, cat)
     
     if df_base is not None:
         df_cek = pd.read_excel(cek_file)
-        # Sütunları standartlaşdırırıq
         df_cek.columns = [str(c).strip().lower() for c in df_cek.columns]
         df_base.columns = [str(c).strip().lower() for c in df_base.columns]
         
-        final_data = []
-        missing_for_control = [] # Bu bizim yeni "Kontrol" siyahımızdır
+        final_data = []      # Excel üçün (ID, QTY, COST)
+        missing_data = []    # Kontrol üçün (Adlar)
         base_ads = df_base['ad'].tolist()
-        
-        # Qiymət sütununu tapırıq
         price_col = next((c for c in df_cek.columns if any(k in c for k in ['vahid', '₼', 'qiym'])), None)
 
+        # Hər bir sətiri tək-tək analiz edirik
         for _, row in df_cek.iterrows():
             try:
                 name = str(row.get('ad', '')).strip()
                 qty = float(row.get('miqdar', 0))
                 price = float(row[price_col]) if price_col else 0
-                
-                if not name or qty == 0:
-                    continue
+                if not name or qty == 0: continue
 
-                # Sənin işləyən rules.py məntiqlərin
+                # Sənin o 91% nəticə verən işləyən məntiqlərin
                 p_name, p_qty, fct = apply_special_logic(name, qty)
                 cost_val = (price / qty) / fct if qty != 0 else 0
-                
-                # Eyniləşdirmə
                 m_name, score = get_best_match(p_name, base_ads)
                 
                 if m_name:
-                    # Bazadan ID-ni çəkirik
+                    # Tapıldısa final siyahıya at
                     mid = df_base[df_base['ad'] == m_name]['id'].values[0]
-                    final_data.append({
-                        'ID': int(mid), 
-                        'QUANTITY': p_qty, 
-                        'COST': round(cost_val, 4)
-                    })
+                    final_data.append({'ID': int(mid), 'QUANTITY': p_qty, 'COST': round(cost_val, 4)})
                 else:
-                    # Tapılmayan 4 məhsul bura düşür
-                    missing_for_control.append({
-                        "Çekdəki Ad": name,
-                        "Botun Axtardığı": p_name,
-                        "Status": "Bazada Tapılmadı"
-                    })
+                    # Tapılmadısa KONTROL siyahısına at
+                    missing_data.append({"Çekdəki Ad": name, "Status": "Bazada tapılmadı"})
             except:
                 continue
 
-        # --- 1. ANALİZ NƏTİCƏSİ (EXCEL) ---
+        # --- 3. SAHƏ: ANALİZİN NƏTİCƏSİ (ÜST HİSSƏ) ---
         if final_data:
-            st.success(f"✅ Analiz uğurla bitdi! {len(final_data)} məhsul hazırlandı.")
+            st.success(f"✅ {len(final_data)} məhsul eyniləşdi.")
             res_df = pd.DataFrame(final_data).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
             st.dataframe(res_df, use_container_width=True)
             
             buf = io.BytesIO()
             res_df.to_excel(buf, index=False)
-            st.download_button("📥 Analiz Faylını Endir", buf.getvalue(), f"{curr}_Final.xlsx")
-        else:
-            st.error("Heç bir məhsul eyniləşmədi!")
-
-        # --- 2. KONTROL HİSSƏSİ (TAPILMAYANLAR) ---
-        if missing_for_control:
+            st.download_button("📥 Faylı Endir", buf.getvalue(), f"{curr}_Analiz.xlsx")
+        
+        # --- 4. SAHƏ: KONTROL HESABATI (ALT HİSSƏ) ---
+        # Bu hissə sadəcə analizdən artanları sənə göstərir
+        if missing_data:
             st.markdown("---")
-            st.subheader("🔍 Tapılmayan Məhsullar (Kontrol)")
-            st.warning(f"Aşağıdakı {len(missing_for_control)} məhsul bazada tapılmadığı üçün fayla əlavə edilməyib:")
-            st.table(pd.DataFrame(missing_for_control))
+            st.subheader("🔍 Kontrol (Tapılmayan Məhsullar)")
+            st.warning(f"Aşağıdakı {len(missing_data)} məhsul eyniləşmədi. Onları bazada yoxlayın:")
+            st.table(pd.DataFrame(missing_data))
+        else:
+            st.success("Təbriklər! Bütün məhsullar eyniləşdi.")
+            
     else:
-        st.error(f"{curr} üçün baza faylı tapılmadı!")
+        st.error("Baza tapılmadı!")
+
