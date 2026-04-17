@@ -42,34 +42,29 @@ def get_best_match(query_name, choices, threshold=95):
     return None, 0
 
 def get_db(res_name, category):
- # 1. Sidebar-dan yüklənən faylı yoxla
-    key = f"u_{res_name}_{'h' if category == 'Horeca' else 'dk'}"
-    uploaded_file = st.session_state.get(key)
-    if uploaded_file:
-        return pd.read_excel(uploaded_file)
-    
-    # 2. GitHub-dakı faylı axtar
-    suffix = "dk" if category == "Dark Kitchen" else "horeca"
-    
-    # Restoran adını normallaşdıraq (Həm Azərbaycan hərflərini, həm də boşluqları nəzərə alaq)
-    res_clean = res_name.lower().replace('ı', 'i').replace('ə', 'e').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u').strip()
-    
-    target_pattern = f"ana_{res_clean}_{suffix}"
-    
+ # GitHub-dakı bütün faylları siyahıla
     files = os.listdir('.')
+    
+    # Axtardığımız açar söz (məsələn: ana_biblioteka_horeca)
+    suffix = "dk" if category == "Dark Kitchen" else "horeca"
+    target = f"ana_{res_name.lower().replace('ı', 'i')}_{suffix}"
+    
     for f in files:
-        f_norm = f.lower().replace('ı', 'i').replace('ə', 'e').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
-        
-        # Əgər faylın adı bizim axtardığımız pattern ilə başlayırsa
-        if f_norm.startswith(target_pattern):
+        # Faylın adı həm bizim hədəflə başlamalı, həm də CSV və ya XLSX olmalıdır
+        if f.lower().startswith(target):
             try:
                 if f.lower().endswith('.csv'):
-                    return pd.read_csv(f)
+                    df = pd.read_csv(f)
+                    # Sütun adlarını normallaşdıraq (id -> ID, Ad -> Ad)
+                    df.columns = [c.strip().lower() for c in df.columns]
+                    if 'id' in df.columns: df = df.rename(columns={'id': 'id'})
+                    return df
                 elif f.lower().endswith('.xlsx'):
-                    return pd.read_excel(f)
+                    df = pd.read_excel(f)
+                    df.columns = [c.strip().lower() for c in df.columns]
+                    return df
             except Exception as e:
-                st.error(f"Faylı oxuyarkən xəta: {e}")
-                
+                st.error(f"Fayl oxunarkən xəta: {e}")
     return None
 
 # --- SIDEBAR (Səliqəli Versiya) ---
