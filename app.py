@@ -102,57 +102,67 @@ for res in ["ROOM", "BİBLİOTEKA", "FİNESTRA"]:
 curr = st.session_state.selected_res
 
 # --- 1. SAHƏ: GİRİŞ VƏ FAYL YÜKLƏMƏ ---
-st.markdown(f"### 📊 {curr} - Analiz Paneli")
-col1, col2 = st.columns(2)
-cat = col1.selectbox("Analiz Sahəsi:", ["Horeca", "Dark Kitchen"])
-cek_file = col2.file_uploader("Sklad Çekini Yüklə", type=["xlsx"])
+st.markdown(f"### 📊 {curr} Paneli")
 
-# --- 2. SAHƏ: ANALİZ MOTORU (TOXUNULMAZ HİSSƏ) ---
+c1, c2 = st.columns(2)
+cat = c1.selectbox("Analiz Sahəsi:", ["Horeca", "Dark Kitchen"])
+cek_file = c2.file_uploader("Faylı seç", type=["xlsx"])
+
+# DÜYMƏNİ BURADAN BAŞLA
 if cek_file and st.button("⚡ Analizi Başlat"):
-    df_base = get_db(curr, cat)
-    if df_base is not None:
+    db_file = get_db(curr, cat)
+    if db_file is not None:
+        # 1. Faylları oxu
         df_cek = pd.read_excel(cek_file)
+        df_base = db_file # get_db-dən gələn df
+        
+        # Sütunları standartlaşdır
         df_cek.columns = [str(c).strip().lower() for c in df_cek.columns]
         df_base.columns = [str(c).strip().lower() for c in df_base.columns]
         
-        final_data = []
-        missing_data = []
+        f_data = [] # Tapılanlar
+        m_data = [] # Tapılmayanlar
+        
         base_ads = df_base['ad'].tolist()
-        # Qiymət sütununu axtar
         price_col = next((c for c in df_cek.columns if any(k in c for k in ['vahid', '₼', 'qiym'])), None)
 
+        # 2. Döngünü başlat
         for _, row in df_cek.iterrows():
             try:
-                name = str(row.get('ad', '')).strip()
-                qty = float(row.get('miqdar', 0))
-                price = float(row[price_col]) if price_col else 0
-                if not name or qty == 0: continue
+                nm = str(row.get('ad', '')).strip()
+                mq = float(row.get('miqdar', 0))
+                pr = float(row[price_col]) if price_col else 0
+                if not nm or mq == 0: continue
 
-                # Riyazi hesablama və Ad eyniləşdirmə
-                p_name, p_qty, fct = apply_special_logic(name, qty)
-                cost_val = (price / qty) / fct if qty != 0 else 0
-                m_name, _ = get_best_match(p_name, base_ads)
+                # Sənin o əsas funksiyaların
+                p_nm, p_mq, fct = apply_special_logic(nm, mq)
+                cst = (pr / mq) / fct if mq != 0 else 0
+                m_nm, _ = get_best_match(p_nm, base_ads)
                 
-                if m_name:
-                    # ID-ni ana bazadan çək
-                    mid = df_base[df_base['ad'] == m_name]['id'].values[0]
-                    final_data.append({'ID': int(mid), 'QUANTITY': p_qty, 'COST': round(cost_val, 4)})
+                if m_nm:
+                    # ID-ni ana bazadan çəkirik
+                    real_id = df_base[df_base['ad'] == m_nm]['id'].values[0]
+                    f_data.append({'ID': int(real_id), 'QUANTITY': p_mq, 'COST': round(cst, 4)})
                 else:
-                    missing_data.append({"Məhsul": name, "Status": "Bazada yoxdur"})
-            except: continue
+                    # Tapılmayanları siyahıya yığırıq
+                    m_data.append({"Məhsul": nm, "Status": "Bazada yoxdur"})
+            except:
+                continue
 
-        # Nəticələri birbaşa ekrana çıxar
-        if final_data:
-            res_df = pd.DataFrame(final_data).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
-            
-            st.write("### ✅ Analiz Nəticəsi")
+        # 3. Nəticəni dərhal ekrana ver
+        if f_data:
+            res_df = pd.DataFrame(f_data).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
+            st.success(f"✅ {len(res_df)} məhsul hazırlandı.")
             st.dataframe(res_df)
             
-            # Faylı yarat və düyməni qoy
+            # Excel düyməsi
             buf = io.BytesIO()
             res_df.to_excel(buf, index=False)
             st.download_button("📥 Faylı Endir", buf.getvalue(), "analiz.xlsx")
-
-        if missing_data:
-            st.write("### 🔍 Kontrol (Tapılmayanlar)")
-            st.table(pd.DataFrame(missing_data))
+        
+        if m_data:
+            st.markdown("---")
+            st.warning("🔍 Kontrol: Aşağıdakılar bazada tapılmadı")
+            st.table(pd.DataFrame(m_data))
+    else:
+        st.error("Baza tapılmadı!")
