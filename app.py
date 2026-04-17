@@ -183,9 +183,46 @@ with tab1:
             st.error("Baza tapılmadı!")
 
 with tab2:
-    st.markdown("#### 🔍 Analizdən Kənarda Qalanlar")
-    if st.session_state.get('missing_items'):
-        st.write("Bu məhsullar bazada (Ad üzərindən) tapılmadığı üçün ID verilə bilmədi:")
-        st.table(pd.DataFrame(st.session_state.missing_items))
-    else:
-        st.info("Bütün məhsullar tapılıb və ya analiz hələ başlamayıb.")
+    st.markdown("#### 🔍 Kontrol Paneli")
+    st.info("Bu hissə Analizdən asılı deyil. Sklad çeki ilə Ana Bazanı (Ad üzərindən) müqayisə edir.")
+    
+    # Müqayisə düyməsi
+    if st.button("🔎 Tapılmayanları Göstər"):
+        # Analiz hissəsində yüklənmiş cek_file-dan istifadə edirik
+        if cek_file is not None:
+            df_s = pd.read_excel(cek_file)
+            db = get_db(curr, cat)
+            
+            if db is not None:
+                # Sütunları standartlaşdırırıq
+                df_s.columns = [str(c).strip().lower() for c in df_s.columns]
+                db.columns = [str(c).strip().lower() for c in db.columns]
+                
+                db_adlar = db['ad'].tolist()
+                tapilmayanlar = []
+
+                for _, row in df_s.iterrows():
+                    ad_cek = str(row.get('ad', '')).strip()
+                    if not ad_cek or ad_cek == 'nan': continue
+                    
+                    # Analiz hissəsindəki eyni axtarış məntiqi
+                    p_name, _, _ = apply_special_logic(ad_cek, 1)
+                    m_name, score = get_best_match(p_name, db_adlar)
+                    
+                    # Əgər bot tapmayıbsa (score < threshold)
+                    if not m_name:
+                        tapilmayanlar.append({
+                            "Çekdəki Orijinal Ad": ad_cek,
+                            "Botun Təmizlədiyi": p_name,
+                            "Status": "Bazada bu ada bənzər mal tapılmadı"
+                        })
+                
+                if tapilmayanlar:
+                    st.warning(f"⚠️ Cəmi {len(tapilmayanlar)} məhsul bazada tapılmadı:")
+                    st.table(pd.DataFrame(tapilmayanlar))
+                else:
+                    st.success("✅ Əla! Çekdəki bütün adlar bazada tapıldı.")
+            else:
+                st.error("Ana baza faylı tapılmadı.")
+        else:
+            st.warning("Zəhmət olmasa əvvəlcə Analiz hissəsində çek faylını yükləyin.")
