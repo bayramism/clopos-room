@@ -29,18 +29,14 @@ def apply_special_logic(name, qty):
 def get_best_match(query_name, choices, threshold=85):
     if not choices: return None, 0
     q_norm = normalize_text(query_name)
-    # Tam uyğunluq
-    for choice in choices:
-        if q_norm == normalize_text(choice): return choice, 100
-    # Oxşarlıq
     best_match, score = process.extractOne(query_name, choices, scorer=fuzz.token_sort_ratio)
     return (best_match, score) if score >= threshold else (None, 0)
 
 def get_db(res_name, category):
     suffix = "dk" if category == "Dark Kitchen" else "horeca"
-    target = f"ana_{res_name.lower().replace('ı', 'i')}_{suffix}"
+    target_name = f"ana_{res_name.lower().replace('ı', 'i')}_{suffix}"
     for f in os.listdir('.'):
-        if f.lower().startswith(target):
+        if f.lower().startswith(target_name):
             try:
                 df = pd.read_excel(f) if f.endswith('.xlsx') else pd.read_csv(f)
                 df.columns = [str(c).strip().lower() for c in df.columns]
@@ -48,7 +44,7 @@ def get_db(res_name, category):
             except: continue
     return None
 
-# --- 2. SIDEBAR (RESTORAN SEÇİMİ) ---
+# --- 2. SIDEBAR ---
 if 'selected_res' not in st.session_state:
     st.session_state.selected_res = "ROOM"
 
@@ -70,12 +66,13 @@ with tab1:
     cek_file = col2.file_uploader("Sklad Çekini Yüklə", type=["xlsx"])
 
     if cek_file and st.button("Analizi Başlat"):
+        # Target adını burada təyin edirik ki, xəta verməsin
+        target_file_prefix = f"ana_{curr.lower().replace('ı', 'i')}_{'dk' if cat == 'Dark Kitchen' else 'horeca'}"
+        
         df_base = get_db(curr, cat)
         if df_base is not None:
             df_cek = pd.read_excel(cek_file)
             final_data = []
-            
-            # Bazadakı adlar siyahısı
             base_ads = df_base['ad'].tolist() if 'ad' in df_base.columns else []
             
             # Çek sütunlarını tapırıq
@@ -84,13 +81,11 @@ with tab1:
 
             for _, row in df_cek.iterrows():
                 try:
-                    name = str(row['Ad'])
-                    qty = float(row['Miqdar'])
+                    name, qty = str(row['Ad']), float(row['Miqdar'])
                     price = float(row[price_col]) if price_col else 0
                     
-                    # COST MƏNTİQİ
+                    # COST MƏNTİQİ (Qiymət / Miqdar) / Faktor
                     p_name, p_qty, fct = apply_special_logic(name, qty)
-                    # Maya dəyəri = (Vahid Qiymət / Miqdar) / Faktor
                     cost_val = (price / qty) / fct if qty != 0 else 0
                     
                     m_name, _ = get_best_match(p_name, base_ads)
@@ -101,16 +96,16 @@ with tab1:
 
             if final_data:
                 res_df = pd.DataFrame(final_data).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
+                st.success("Analiz tamamlandı!")
                 st.dataframe(res_df, use_container_width=True)
                 
-                excel_buf = io.BytesIO()
-                res_df.to_excel(excel_buf, index=False)
-                st.download_button("📥 Nəticəni Endir", excel_buf.getvalue(), f"{curr}_{cat}.xlsx")
+                buf = io.BytesIO()
+                res_df.to_excel(buf, index=False)
+                st.download_button("📥 Nəticəni Endir", buf.getvalue(), f"{curr}_{cat}.xlsx")
             else:
-                st.warning("Uyğun gələn məhsul tapılmadı.")
+                st.warning("Uyğun məhsul tapılmadı.")
         else:
-            st.error(f"GitHub-da '{target}' bazası tapılmadı!")
+            st.error(f"GitHub-da '{target_file_prefix}' ilə başlayan baza tapılmadı!")
 
 with tab2:
-    st.info("Tapılmayan məhsulların siyahısı burada görünəcək.")
-    # Kontrol məntiqi bura əlavə edilə bilər (istəyindən asılı olaraq)
+    st.info("Tapılmayan məhsullar üçün analiz edin.")
