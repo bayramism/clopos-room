@@ -11,13 +11,39 @@ st.set_page_config(page_title="CLOPOS AI Analiz", layout="wide")
 
 # --- 1. MƏNTİQİ FUNKSİYALAR ---
 def normalize_text(text):
-    if not text: return ""
+   if not text: return ""
+    # Yazını təmizləyirik: kiçik hərf, boşluqların silinməsi
     text = str(text).lower().strip()
-    replace_map = {'ç': 'c', 'ə': 'e', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u'}
+    
+    # Azərbaycan hərflərini və bəzi simvolları tamamilə standartlaşdırırıq
+    replace_map = {
+        'ç': 'c', 'ə': 'e', 'ğ': 'g', 'ı': 'i', 'i̇': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u',
+        '–': '-', '—': '-', ' .': '.', '. ': '.'
+    }
     for k, v in replace_map.items():
         text = text.replace(k, v)
-    text = re.sub(r'\(ed\)|\(kg\)|\(kq\)|ed|gr|qr|kg|kq', '', text)
+    
+    # Mötərizələri və içindəki (ed), (kg) kimi sözləri təmizləyirik ki, ada mane olmasın
+    text = re.sub(r'\(ed\)|\(kg\)|\(kq\)|\(lt\)|\(qr\)|\(gr\)', '', text)
+    # Lazımsız bütün simvolları (nöqtə, vergül, mötərizə) silirik
+    text = re.sub(r'[^\w\s]', '', text)
+    
     return " ".join(text.split())
+
+def get_best_match(query_name, choices, threshold=60): # Threshold-u 60-a endirdik
+    if not choices: return None, 0
+    q_norm = normalize_text(query_name)
+    
+    # 1. Tam eynidirsə dərhal qaytar
+    for choice in choices:
+        if q_norm == normalize_text(choice):
+            return choice, 100
+            
+    # 2. Fuzzy match - daha dərindən axtarış
+    # token_set_ratio sözlərin sırasına baxmır, bu bizə lazımdır
+    best_match, score = process.extractOne(query_name, choices, scorer=fuzz.token_set_ratio)
+    
+    return (best_match, score) if score >= threshold else (None, 0)
 
 def apply_special_logic(name, qty):
     n_norm = normalize_text(name)
