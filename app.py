@@ -77,24 +77,59 @@ def standardize_columns(df):
             renamed[col] = "id"
     return df.rename(columns=renamed)
 
-# --- SİDEBAR ---
-st.sidebar.markdown("#### 📁 ANA BAZALAR")
-res_options = ["ROOM", "BİBLİOTEKA", "FİNESTRA"]
-for res_opt in res_options:
-    with st.sidebar.expander(f"🏢 {res_opt}", expanded=(st.session_state.selected_res == res_opt)):
-        if st.button(f"Seç {res_opt}", key=f"btn_{res_opt}"):
-            st.session_state.selected_res = res_opt
-            st.rerun()
-        st.file_uploader("Horeca", type=["xlsx"], key=f"u_{res_opt}_h")
-        st.file_uploader("DK", type=["xlsx"], key=f"u_{res_opt}_dk")
 
-# Lokal bazaları yükləmə məntiqi (Online-da işləməsi üçün)
+def normalize_restaurant_name(name):
+    return (
+        str(name).lower()
+        .replace("ı", "i")
+        .replace("i̇", "i")
+        .strip()
+    )
+
+
+def discover_restaurants():
+    restaurants = set()
+    for file_name in os.listdir("."):
+        lower_name = file_name.lower()
+        if not lower_name.startswith("ana_"):
+            continue
+        if not (lower_name.endswith(".xlsx") or lower_name.endswith(".csv")):
+            continue
+        if "_horeca" in lower_name:
+            restaurants.add(file_name[4:].rsplit("_horeca", 1)[0].upper())
+        elif "_dk" in lower_name:
+            restaurants.add(file_name[4:].rsplit("_dk", 1)[0].upper())
+    return sorted(restaurants) if restaurants else ["ROOM", "BIBLIOTEKA", "FINESTRA"]
+
 def get_db(res_name, category):
-    key = f"u_{res_name}_{'h' if category == 'Horeca' else 'dk'}"
-    uploaded_file = st.session_state.get(key)
-    if uploaded_file:
-        return pd.read_excel(uploaded_file)
+    suffix = "horeca" if category == "Horeca" else "dk"
+    target_prefix = f"ana_{normalize_restaurant_name(res_name)}_{suffix}"
+    for file_name in os.listdir("."):
+        normalized_file = normalize_restaurant_name(file_name)
+        if normalized_file.startswith(target_prefix):
+            try:
+                if file_name.lower().endswith(".xlsx"):
+                    return pd.read_excel(file_name)
+                if file_name.lower().endswith(".csv"):
+                    return pd.read_csv(file_name)
+            except Exception:
+                continue
     return None
+
+
+# --- SİDEBAR ---
+st.sidebar.markdown("#### 🏢 Restoran seçimi")
+res_options = discover_restaurants()
+if st.session_state.selected_res not in res_options:
+    st.session_state.selected_res = res_options[0]
+
+for res_opt in res_options:
+    label = f"{res_opt} ✅" if st.session_state.selected_res == res_opt else res_opt
+    if st.sidebar.button(label, key=f"btn_{res_opt}", use_container_width=True):
+        st.session_state.selected_res = res_opt
+        st.rerun()
+
+st.sidebar.info("Ana baza faylları GitHub mənbəsindən avtomatik oxunur.")
 
 # --- PANELLƏR ---
 curr = st.session_state.selected_res
@@ -170,23 +205,30 @@ with tab1:
             buf = io.BytesIO()
             res_df.to_excel(buf, index=False)
             st.download_button("📥 Endir", buf.getvalue(), f"{curr}_{datetime.now().strftime('%Y%m%d')}.xlsx")
-        else: st.error("Sidebar-dan müvafiq bazanı yükləyin!")
+        else:
+            st.error("Uyğun ana baza tapılmadı. Repo daxilində fayl adı `ana_<restoran>_<horeca/dk>` formatında olmalıdır.")
 
 with tab2:
     f_orig = st.file_uploader("1. Orijinal Çek", type=["xlsx"], key="ko")
     f_bot = st.file_uploader("2. Analiz Faylı", type=["xlsx"], key="kb")
     if f_orig and f_bot and st.button("🔍 Yoxla"):
         df_o, df_b = pd.read_excel(f_orig), pd.read_excel(f_bot)
+        df_o = standardize_columns(df_o)
+        df_b = standardize_columns(df_b)
         db = get_db(curr, "Horeca")
         if db is not None:
+            db = standardize_columns(db)
             missing = []
             for _, row in df_o.iterrows():
-                name = str(row['Ad'])
+                name = str(row.get("ad", ""))
                 p_name, _, _ = apply_special_logic(name, 1)
-                m_name, _ = get_best_match(p_name, db['Ad'].tolist(), threshold=80)
+                m_name, _ = get_best_match(p_name, db["ad"].tolist(), threshold=80)
                 if m_name:
-                    tid = db[db['Ad'] == m_name]['id'].values[0]
-                    if int(tid) not in df_b['ID'].values: missing.append(name)
-                else: missing.append(f"{name} (Bazada yoxdur)")
+                    tid = db[db["ad"] == m_name]["id"].values[0]
+                    if int(tid) not in df_b["id"].values:
+                        missing.append(name)
+                else:
+                    missing.append(f"{name} (Bazada yoxdur)")
             st.table(pd.DataFrame(missing, columns=["Tapılmayanlar"]))
-        else: st.error("Baza yüklənməyib!")
+        else:
+            st.error("Uyğun ana baza tapılmadı.")
