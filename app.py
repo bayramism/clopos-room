@@ -42,26 +42,27 @@ def get_best_match(query_name, choices, threshold=95):
     return None, 0
 
 def get_db(res_name, category):
-  # 1. Sidebar-dan yüklənən faylı yoxla
+    # 1. Sidebar-dan müvəqqəti yükləmə (həmişə üstündür)
     key = f"u_{res_name}_{'h' if category == 'Horeca' else 'dk'}"
     uploaded_file = st.session_state.get(key)
     if uploaded_file:
         return pd.read_excel(uploaded_file)
     
-    # 2. GitHub-dakı faylı axtar
+    # 2. GitHub-da yalnız müvafiq faylı axtar
+    # Horeca üçün 'horeca', Dark Kitchen üçün 'dk' suffix-i
     suffix = "dk" if category == "Dark Kitchen" else "horeca"
-    base_name = f"ana_{res_name.lower()}_{suffix}"
+    target_start = f"ana_{res_name.lower()}_{suffix}"
     
-    # Sənin yüklədiyin o uzun ad üçün xüsusi yoxlama
-    files_in_dir = os.listdir('.') # Bütün faylları siyahıla
-    for f in files_in_dir:
-        # Əgər faylın adı "ana_biblioteka_horeca" ilə başlayırsa və CSV-dirsə oxu
-        if f.lower().startswith(base_name) and f.lower().endswith('.csv'):
-            return pd.read_csv(f)
-        # Excel variantını da yoxla
-        if f.lower().startswith(base_name) and f.lower().endswith('.xlsx'):
-            return pd.read_excel(f)
-            
+    files = os.listdir('.')
+    for f in files:
+        f_lower = f.lower()
+        # Faylın adı tam olaraq seçilən restoran və sahə ilə başlamalıdır
+        if f_lower.startswith(target_start):
+            if f_lower.endswith('.csv'):
+                return pd.read_csv(f)
+            elif f_lower.endswith('.xlsx'):
+                return pd.read_excel(f)
+                
     return None
 
 # --- SIDEBAR (Səliqəli Versiya) ---
