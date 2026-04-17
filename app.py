@@ -102,7 +102,7 @@ with tab1:
     cek = c2.file_uploader("📄 Sklad Çekini Yüklə", type=["xlsx"])
 
     if cek and st.button("⚡ Analizi Başlat"):
-        df_base = get_db(curr, cat)
+       df_base = get_db(curr, cat)
         if df_base is not None:
             df_c = pd.read_excel(cek)
             # DİQQƏT: Bazadakı sütun adlarını kiçik hərflə çağırırıq
@@ -126,6 +126,17 @@ with tab1:
                         final_list.append({'ID': int(mid), 'QUANTITY': p_qty, 'COST': round(cost, 4)})
                 except Exception as e:
                     continue
+            
+            if final_list:
+                res_df = pd.DataFrame(final_list).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
+                st.dataframe(res_df, use_container_width=True)
+                buf = io.BytesIO()
+                res_df.to_excel(buf, index=False)
+                st.download_button("📥 Endir", buf.getvalue(), f"{curr}_{cat}_{datetime.now().strftime('%Y%m%d')}.xlsx")
+            else:
+                st.warning("Heç bir məhsul eyniləşdirilmədi. Bazadakı adlarla çekdəki adlar uyğun gəlmir.")
+        else:
+            st.error(f"⚠️ {curr} üçün {cat} bazası tapılmadı!")
             
             if final_list:
                 res_df = pd.DataFrame(final_list).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
