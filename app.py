@@ -113,27 +113,30 @@ with tab1:
     cat = col1.selectbox("Analiz Sahəsi:", ["Horeca", "Dark Kitchen"])
     cek_file = col2.file_uploader("Sklad Çekini Yüklə", type=["xlsx"])
 
+    # DÜYMƏ BURADADIR
     if cek_file and st.button("⚡ Analizi Başlat"):
-        # Hər dəfə düyməyə basanda siyahını sıfırlayırıq
-        st.session_state.missing_items = []
+        st.info("Analiz başladı, zəhmət olmasa gözləyin...") # Reaksiyanı yoxlamaq üçün
+        
+        st.session_state.missing_items = [] # Köhnələri təmizlə
         
         df_base = get_db(curr, cat)
         if df_base is not None:
             df_cek = pd.read_excel(cek_file)
             
-            # Sütun adlarını kiçildirik ki, bot hər şeyi oxuya bilsin
+            # Sütun adlarını standartlaşdırırıq
             df_cek.columns = [str(c).strip().lower() for c in df_cek.columns]
             df_base.columns = [str(c).strip().lower() for c in df_base.columns]
             
             final_data = []
             base_ads = df_base['ad'].tolist()
             
-            # Qiymət sütununu (1 Vahid, ₼) axtarırıq
+            # Qiymət sütununu tapırıq
             price_col = next((c for c in df_cek.columns if any(k in c for k in ['vahid', '₼', 'qiym'])), None)
 
             if not price_col:
                 st.error("Çekdə qiymət sütunu tapılmadı!")
             else:
+                # DÖNGÜ BAŞLAYIR
                 for _, row in df_cek.iterrows():
                     try:
                         name = str(row.get('ad', ''))
@@ -142,38 +145,32 @@ with tab1:
                         
                         if not name or qty == 0: continue
 
-                        # Riyazi və xüsusi qaydalar
                         p_name, p_qty, fct = apply_special_logic(name, qty)
                         cost_val = (price / qty) / fct if qty != 0 else 0
                         
-                        # Ana bazadan ID-ni axtarırıq
                         m_name, score = get_best_match(p_name, base_ads)
                         
                         if m_name:
-                            # Sənin ana bazandakı daxili ID-ni tapırıq
                             mid = df_base[df_base['ad'] == m_name]['id'].values[0]
                             final_data.append({'ID': int(mid), 'QUANTITY': p_qty, 'COST': round(cost_val, 4)})
                         else:
-                            # Tapılmayan 4 məhsul birbaşa bura düşür
-                            st.session_state.missing_items.append({
-                                "Çekdəki Ad": name,
-                                "Status": "Bazada tapılmadı",
-                                "Oxşarlıq": f"{score}%"
-                            })
-                    except: continue
+                            st.session_state.missing_items.append({"Çekdəki Ad": name, "Status": "Tapılmadı"})
+                    except:
+                        continue
 
+                # NƏTİCƏNİ GÖSTƏR
                 if final_data:
                     res_df = pd.DataFrame(final_data).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
-                    st.success(f"Analiz tamamlandı! {len(res_df)} məhsul eyniləşdi.")
+                    st.success(f"Analiz tamamlandı! {len(res_df)} məhsul tapıldı.")
                     st.dataframe(res_df, use_container_width=True)
                     
                     buf = io.BytesIO()
                     res_df.to_excel(buf, index=False)
-                    st.download_button("📥 Analiz Faylını Endir", buf.getvalue(), f"{curr}_Analiz.xlsx")
-                
-                if st.session_state.missing_items:
-                    st.warning(f"⚠️ {len(st.session_state.missing_items)} məhsul tapılmadı! 'Kontrol' bölməsinə baxın.")
-
+                    st.download_button("📥 Faylı Endir", buf.getvalue(), f"{curr}_Analiz.xlsx")
+                else:
+                    st.warning("Eyniləşdirmə alınmadı.")
+        else:
+            st.error("Baza tapılmadı (Database not found).")
 # --- 3. KONTROL TABI (Analiz bitəndən sonra baxmaq üçün) ---
 with tab2:
     st.subheader("🔍 Analizdən Kənarda Qalanlar")
