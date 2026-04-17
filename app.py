@@ -11,23 +11,14 @@ st.set_page_config(page_title="CLOPOS AI Analiz", layout="wide")
 
 # --- 1. MƏNTİQİ FUNKSİYALAR ---
 def normalize_text(text):
-   if not text: return ""
-    # Yazını təmizləyirik: kiçik hərf, boşluqların silinməsi
+    if not text: return ""
     text = str(text).lower().strip()
-    
-    # Azərbaycan hərflərini və bəzi simvolları tamamilə standartlaşdırırıq
-    replace_map = {
-        'ç': 'c', 'ə': 'e', 'ğ': 'g', 'ı': 'i', 'i̇': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u',
-        '–': '-', '—': '-', ' .': '.', '. ': '.'
-    }
-    for k, v in replace_map.items():
+    # Azərbaycan şrifti və simvol təmizliyi
+    rep = {'ç':'c','ə':'e','ğ':'g','ı':'i','i̇':'i','ö':'o','ş':'s','ü':'u'}
+    for k, v in rep.items():
         text = text.replace(k, v)
-    
-    # Mötərizələri və içindəki (ed), (kg) kimi sözləri təmizləyirik ki, ada mane olmasın
+    # (ed), (kg) kimi maneələri silirik
     text = re.sub(r'\(ed\)|\(kg\)|\(kq\)|\(lt\)|\(qr\)|\(gr\)', '', text)
-    # Lazımsız bütün simvolları (nöqtə, vergül, mötərizə) silirik
-    text = re.sub(r'[^\w\s]', '', text)
-    
     return " ".join(text.split())
 
 def get_best_match(query_name, choices, threshold=60): # Threshold-u 60-a endirdik
@@ -101,6 +92,12 @@ with tab1:
     if cek_file and st.button("Analizi Başlat"):
         df_base = get_db(curr, cat)
         if df_base is not None:
+            df_cek = pd.read_excel(cek_file)
+        
+            # Sütunları kiçildirik (ƏN VACİB HİSSƏ)
+            df_cek.columns = [str(c).strip().lower() for c in df_cek.columns]
+            df_base.columns = [str(c).strip().lower() for c in df_base.columns]
+       
             # 1. Çeki oxu və bütün sütun adlarını təmizlə
             df_cek = pd.read_excel(cek_file)
             df_cek.columns = [str(c).strip().lower() for c in df_cek.columns]
