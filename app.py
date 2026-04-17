@@ -90,7 +90,7 @@ with tab1:
     cek_file = col2.file_uploader("Sklad Çekini Yüklə", type=["xlsx"])
 
     if cek_file and st.button("Analizi Başlat"):
-       df_base = get_db(curr, cat)
+        df_base = get_db(curr, cat)
         if df_base is not None:
             df_cek = pd.read_excel(cek_file)
             
