@@ -45,8 +45,29 @@ def apply_special_logic(name, qty):
 
 def get_best_match(query_name, choices, threshold=85):
     if not choices: return None, 0
+    
+    # 1. MƏRHƏLƏ: Tam eyniləşdirmə (Normalizasiya olunmuş formada)
     q_norm = normalize_text(query_name)
-    best_match, score = process.extractOne(query_name, choices, scorer=fuzz.token_sort_ratio)
+    for choice in choices:
+        if q_norm == normalize_text(choice):
+            return choice, 100
+            
+    # 2. MƏRHƏLƏ: Söz-söz yoxlama (Token Set Ratio)
+    # Bu, "Qaymaq Petmol" ilə "Petmol Qaymaq" arasındakı fərqi yox edir.
+    best_match, score = process.extractOne(query_name, choices, scorer=fuzz.token_set_ratio)
+    
+    # 3. MƏRHƏLƏ: Əgər hesab 80-dən yuxarıdırsa, deməli demək olar ki, eynidir
+    if score >= 80:
+        return best_match, score
+    
+    # 4. MƏRHƏLƏ: Daha riskli, amma lazımlı axtarış (Partial Ratio)
+    # Məsələn, çekdə "Qaymaq" yazılıb, bazada "Qaymaq Petmol 33%". 
+    # Partial ratio bunu tuta bilir.
+    p_match, p_score = process.extractOne(query_name, choices, scorer=fuzz.partial_ratio)
+    
+    if p_score > 85: # Qısaldılmış adlar üçün yüksək limit
+        return p_match, p_score
+        
     return (best_match, score) if score >= threshold else (None, 0)
 
 def get_db(res_name, category):
