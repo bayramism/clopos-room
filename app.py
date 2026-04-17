@@ -42,17 +42,36 @@ def get_best_match(query_name, choices, threshold=95):
     return None, 0
 
 def get_db(res_name, category):
-# Müstəqil baza axtarışı (ana_biblioteka_horeca və s.)
-    sfx = "dk" if category == "Dark Kitchen" else "horeca"
-    target = f"ana_{res_name.lower().replace('ı', 'i')}_{sfx}"
+    import os
     
-    for f in os.listdir('.'):
-        if f.lower().startswith(target):
-            # Excel və ya CSV fərq etmədən oxu
-            df = pd.read_excel(f) if f.endswith('.xlsx') else pd.read_csv(f)
-            # Sütunları kiçik hərf et (id, ad) ki, proqram çaşmasın
-            df.columns = [str(c).strip().lower() for c in df.columns]
-            return df
+    # 1. Müəyyən edirik ki, hazırda hansı faylı axtarmalıyıq
+    suffix = "dk" if category == "Dark Kitchen" else "horeca"
+    # Adı normallaşdırırıq (məs: ana_biblioteka_horeca)
+    target = f"ana_{res_name.lower().replace('ı', 'i')}_{suffix}"
+    
+    # 2. GitHub-da olan bütün faylları siyahıla
+    all_files = os.listdir('.')
+    
+    for f in all_files:
+        f_lower = f.lower().replace('ı', 'i')
+        # Sənin yüklədiyin faylın adı bu patternlə başlayırsa (məs: ana_biblioteka_horeca...)
+        if f_lower.startswith(target):
+            try:
+                # Excel və ya CSV olmasından asılı olmayaraq oxu
+                if f.endswith('.csv'):
+                    df = pd.read_csv(f)
+                else:
+                    df = pd.read_excel(f)
+                
+                # Sütun adlarını kiçik hərf edirik (id, ad)
+                df.columns = [str(c).strip().lower() for c in df.columns]
+                return df
+            except Exception as e:
+                st.error(f"Fayl oxunarkən xəta yarandı: {e}")
+                return None
+                
+    # 3. Əgər fayl yoxdursa (hələ yükləməmisənsə), sadəcə xəbərdarlıq ver və işi dayandırma
+    return None
 # --- SIDEBAR (Səliqəli Versiya) ---
 st.sidebar.markdown("### 🏢 RESTORAN SEÇİMİ")
 res_options = ["ROOM", "BİBLİOTEKA", "FİNESTRA"]
