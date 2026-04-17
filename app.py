@@ -42,26 +42,26 @@ def get_best_match(query_name, choices, threshold=95):
     return None, 0
 
 def get_db(res_name, category):
-   # 1. Sidebar-dan yüklənən faylı yoxla
+  # 1. Sidebar-dan yüklənən faylı yoxla
     key = f"u_{res_name}_{'h' if category == 'Horeca' else 'dk'}"
     uploaded_file = st.session_state.get(key)
     if uploaded_file:
         return pd.read_excel(uploaded_file)
     
-    # 2. GitHub-dakı faylı axtar (Excel və ya CSV)
+    # 2. GitHub-dakı faylı axtar
     suffix = "dk" if category == "Dark Kitchen" else "horeca"
     base_name = f"ana_{res_name.lower()}_{suffix}"
     
-    # Excel yoxla
-    if os.path.exists(f"{base_name}.xlsx"):
-        return pd.read_excel(f"{base_name}.xlsx")
-    # CSV yoxla (Sənin yüklədiyin format üçün)
-    elif os.path.exists(f"{base_name}.csv"):
-        return pd.read_csv(f"{base_name}.csv")
-    # Sənin göndərdiyin xüsusi uzun ad üçün (müvəqqəti kömək)
-    elif os.path.exists(f"{base_name}.xlsx - Worksheet.csv"):
-        return pd.read_csv(f"{base_name}.xlsx - Worksheet.csv")
-        
+    # Sənin yüklədiyin o uzun ad üçün xüsusi yoxlama
+    files_in_dir = os.listdir('.') # Bütün faylları siyahıla
+    for f in files_in_dir:
+        # Əgər faylın adı "ana_biblioteka_horeca" ilə başlayırsa və CSV-dirsə oxu
+        if f.lower().startswith(base_name) and f.lower().endswith('.csv'):
+            return pd.read_csv(f)
+        # Excel variantını da yoxla
+        if f.lower().startswith(base_name) and f.lower().endswith('.xlsx'):
+            return pd.read_excel(f)
+            
     return None
 
 # --- SIDEBAR (Səliqəli Versiya) ---
