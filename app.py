@@ -33,14 +33,21 @@ def get_best_match(query_name, choices, threshold=85):
     return (best_match, score) if score >= threshold else (None, 0)
 
 def get_db(res_name, category):
-    suffix = "dk" if category == "Dark Kitchen" else "horeca"
-    target_name = f"ana_{res_name.lower().replace('ı', 'i')}_{suffix}"
+    import os
+    # Sahəni seçirik
+    sfx = "dk" if category == "Dark Kitchen" else "horeca"
+    
+    # Hər şeyi (həm restoran adını, həm fayl adını) tam təmizləyirik
+    res_clean = res_name.lower().replace('ı', 'i').replace('i̇', 'i').strip()
+    target = f"ana_{res_clean}_{sfx}"
+    
     for f in os.listdir('.'):
-        if f.lower().startswith(target_name):
+        # Faylın adındakı bütün gizli nöqtəli İ-ləri və s. təmizləyib yoxlayırıq
+        f_norm = f.lower().replace('ı', 'i').replace('i̇', 'i')
+        if f_norm.startswith(target):
             try:
-                df = pd.read_excel(f) if f.endswith('.xlsx') else pd.read_csv(f)
-                df.columns = [str(c).strip().lower() for c in df.columns]
-                return df
+                # Excel-dirsə belə oxu
+                return pd.read_excel(f) if f.endswith('.xlsx') else pd.read_csv(f)
             except: continue
     return None
 
