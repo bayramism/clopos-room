@@ -101,8 +101,11 @@ for res in ["ROOM", "BİBLİOTEKA", "FİNESTRA"]:
 
 curr = st.session_state.selected_res
 
-# --- 3. ƏSAS PANEL ---
-st.header(f"🚀 {curr} Analiz Sistemi")
+# --- 1. YADDAŞI HAZIRLAYIRIQ (Faylın yuxarısında, tabs-dan əvvəl də ola bilər) ---
+if 'missing_items' not in st.session_state:
+    st.session_state.missing_items = []
+
+# --- 2. TABLARIN YARADILMASI ---
 tab1, tab2 = st.tabs(["📊 Analiz", "🔍 Kontrol"])
 
 with tab1:
@@ -110,68 +113,77 @@ with tab1:
     cat = col1.selectbox("Analiz Sahəsi:", ["Horeca", "Dark Kitchen"])
     cek_file = col2.file_uploader("Sklad Çekini Yüklə", type=["xlsx"])
 
-    if cek_file and st.button("Analizi Başlat"):
+    if cek_file and st.button("⚡ Analizi Başlat"):
+        # Hər dəfə düyməyə basanda siyahını sıfırlayırıq
+        st.session_state.missing_items = []
+        
         df_base = get_db(curr, cat)
         if df_base is not None:
             df_cek = pd.read_excel(cek_file)
             
-            # Sütunları standartlaşdıraq (bütün boşluqları sil və kiçik hərf et)
+            # Sütun adlarını kiçildirik ki, bot hər şeyi oxuya bilsin
             df_cek.columns = [str(c).strip().lower() for c in df_cek.columns]
             df_base.columns = [str(c).strip().lower() for c in df_base.columns]
             
             final_data = []
             base_ads = df_base['ad'].tolist()
             
-            # Qiymət sütununu (1 Vahid, ₼) dəqiq tapmaq üçün axtarış
-            price_col = next((c for c in df_cek.columns if any(k in c for k in ['1 vahid', '₼', 'qiymet'])), None)
+            # Qiymət sütununu (1 Vahid, ₼) axtarırıq
+            price_col = next((c for c in df_cek.columns if any(k in c for k in ['vahid', '₼', 'qiym'])), None)
 
-            for _, row in df_cek.iterrows():
-                try:
-                    # Çekdən gələn xam məlumatlar
-                    o_name = str(row.get('ad', ''))
-                    o_qty = float(row.get('miqdar', 0))
-                    o_prc = float(row[price_col]) if price_col else 0
-                    
-                    if not o_name or o_qty == 0: continue
-
-                    # 1. Riyazi/Xüsusi Qaydalar (Faktor) - rules.py-dan
-                    p_name, p_qty, fct = apply_special_logic(o_name, o_qty)
-                    
-                    # 2. Maya dəyəri (Cost) hesabı
-                    # Düstur: (Vahid Qiymət / Çekdəki Miqdar) / Faktor dərəcəsi
-                    # Bu, məhsulun bazandakı 1 vahidinin (kq/lt) təmiz maya dəyərini çıxarır.
-                    cost_val = (o_prc / o_qty) / fct if o_qty != 0 else 0
-                    
-                    # 3. Eyniləşdirmə - Çekdəki adı bazada axtarırıq
-                    m_name, score = get_best_match(p_name, base_ads, threshold=70)
-                    
-                    if m_name:
-                        # Tapıldı! İndi ID-ni tədarükçüdən yox, öz ana bazandan götür
-                        real_inventory_id = df_base[df_base['ad'] == m_name]['id'].values[0]
-                        
-                        final_data.append({
-                            'ID': int(real_inventory_id), 
-                            'QUANTITY': p_qty, 
-                            'COST': round(cost_val, 4)
-                        })
-                except Exception as e:
-                    continue
-
-            if final_data:
-                # Eyni ID-li məhsulları (məsələn, çekdə iki fərqli sətirdə gələn eyni malı) cəmləyirik
-                res_df = pd.DataFrame(final_data).groupby('ID').agg({
-                    'QUANTITY': 'sum', 
-                    'COST': 'mean'
-                }).reset_index()
-                
-                st.success(f"Analiz tamamlandı! {len(res_df)} məhsul Inventory ID-si ilə hazırlandı.")
-                st.dataframe(res_df, use_container_width=True)
-                
-                # Excel faylını hazırlayıb istifadəçiyə veririk
-                buf = io.BytesIO()
-                res_df.to_excel(buf, index=False)
-                st.download_button("📥 Analiz Faylını Endir", buf.getvalue(), f"{curr}_{cat}_Final.xlsx")
+            if not price_col:
+                st.error("Çekdə qiymət sütunu tapılmadı!")
             else:
-                st.warning("Bazadakı adlarla heç bir məhsul uyğunlaşmadı.")
-        else:
-            st.error("Ana baza faylı tapılmadı!")
+                for _, row in df_cek.iterrows():
+                    try:
+                        name = str(row.get('ad', ''))
+                        qty = float(row.get('miqdar', 0))
+                        price = float(row[price_col])
+                        
+                        if not name or qty == 0: continue
+
+                        # Riyazi və xüsusi qaydalar
+                        p_name, p_qty, fct = apply_special_logic(name, qty)
+                        cost_val = (price / qty) / fct if qty != 0 else 0
+                        
+                        # Ana bazadan ID-ni axtarırıq
+                        m_name, score = get_best_match(p_name, base_ads)
+                        
+                        if m_name:
+                            # Sənin ana bazandakı daxili ID-ni tapırıq
+                            mid = df_base[df_base['ad'] == m_name]['id'].values[0]
+                            final_data.append({'ID': int(mid), 'QUANTITY': p_qty, 'COST': round(cost_val, 4)})
+                        else:
+                            # Tapılmayan 4 məhsul birbaşa bura düşür
+                            st.session_state.missing_items.append({
+                                "Çekdəki Ad": name,
+                                "Status": "Bazada tapılmadı",
+                                "Oxşarlıq": f"{score}%"
+                            })
+                    except: continue
+
+                if final_data:
+                    res_df = pd.DataFrame(final_data).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
+                    st.success(f"Analiz tamamlandı! {len(res_df)} məhsul eyniləşdi.")
+                    st.dataframe(res_df, use_container_width=True)
+                    
+                    buf = io.BytesIO()
+                    res_df.to_excel(buf, index=False)
+                    st.download_button("📥 Analiz Faylını Endir", buf.getvalue(), f"{curr}_Analiz.xlsx")
+                
+                if st.session_state.missing_items:
+                    st.warning(f"⚠️ {len(st.session_state.missing_items)} məhsul tapılmadı! 'Kontrol' bölməsinə baxın.")
+
+# --- 3. KONTROL TABI (Analiz bitəndən sonra baxmaq üçün) ---
+with tab2:
+    st.subheader("🔍 Analizdən Kənarda Qalanlar")
+    if st.session_state.missing_items:
+        st.write("Aşağıdakı məhsullar bazada tapılmadığı üçün nəticə faylına əlavə edilməyib:")
+        # Tapılmayanları cədvəl kimi göstəririk
+        st.table(pd.DataFrame(st.session_state.missing_items))
+        
+        if st.button("Siyahını Təmizlə"):
+            st.session_state.missing_items = []
+            st.rerun()
+    else:
+        st.info("Bütün məhsullar tapılıb və ya hələ analiz aparılmayıb.")
