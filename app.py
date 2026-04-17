@@ -42,31 +42,17 @@ def get_best_match(query_name, choices, threshold=95):
     return None, 0
 
 def get_db(res_name, category):
- # GitHub-dakı bütün faylları siyahıla
-    files = os.listdir('.')
+# Müstəqil baza axtarışı (ana_biblioteka_horeca və s.)
+    sfx = "dk" if category == "Dark Kitchen" else "horeca"
+    target = f"ana_{res_name.lower().replace('ı', 'i')}_{sfx}"
     
-    # Axtardığımız açar söz (məsələn: ana_biblioteka_horeca)
-    suffix = "dk" if category == "Dark Kitchen" else "horeca"
-    target = f"ana_{res_name.lower().replace('ı', 'i')}_{suffix}"
-    
-    for f in files:
-        # Faylın adı həm bizim hədəflə başlamalı, həm də CSV və ya XLSX olmalıdır
+    for f in os.listdir('.'):
         if f.lower().startswith(target):
-            try:
-                if f.lower().endswith('.csv'):
-                    df = pd.read_csv(f)
-                    # Sütun adlarını normallaşdıraq (id -> ID, Ad -> Ad)
-                    df.columns = [c.strip().lower() for c in df.columns]
-                    if 'id' in df.columns: df = df.rename(columns={'id': 'id'})
-                    return df
-                elif f.lower().endswith('.xlsx'):
-                    df = pd.read_excel(f)
-                    df.columns = [c.strip().lower() for c in df.columns]
-                    return df
-            except Exception as e:
-                st.error(f"Fayl oxunarkən xəta: {e}")
-    return None
-
+            # Excel və ya CSV fərq etmədən oxu
+            df = pd.read_excel(f) if f.endswith('.xlsx') else pd.read_csv(f)
+            # Sütunları kiçik hərf et (id, ad) ki, proqram çaşmasın
+            df.columns = [str(c).strip().lower() for c in df.columns]
+            return df
 # --- SIDEBAR (Səliqəli Versiya) ---
 st.sidebar.markdown("### 🏢 RESTORAN SEÇİMİ")
 res_options = ["ROOM", "BİBLİOTEKA", "FİNESTRA"]
