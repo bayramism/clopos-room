@@ -112,11 +112,31 @@ with tab1:
             base_ads = df_base['ad'].tolist() if 'ad' in df_base.columns else []
             
             for _, row in df_c.iterrows():
-                try:
-                    o_name = str(row['Ad'])
-                    o_qty = float(row['Miqdar'])
-                    o_prc = float(row['1 Vahid, ₼'])
+               try:
+                    # Sütun adlarını dinamik tapırıq (Səhv burda olurdu)
+                    # Çekdəki sütunları təmizləyib axtarırıq
+                    c_cols = {str(c).strip(): c for c in df_c.columns}
                     
+                    # 'Ad' sütununu götür
+                    o_name = str(row[c_cols.get('Ad', 'Ad')])
+                    
+                    # 'Miqdar' sütununu götür
+                    o_qty = float(row[c_cols.get('Miqdar', 'Miqdar')])
+                    
+                    # Qiymət sütununu tapmaq üçün daha etibarlı yol:
+                    # Çünki Excel-də '1 Vahid, ₼' adı çox vaxt problem yaradır
+                    price_col = None
+                    for c in df_c.columns:
+                        if '1 Vahid' in str(c) or '₼' in str(c):
+                            price_col = c
+                            break
+                    
+                    if price_col:
+                        o_prc = float(row[price_col])
+                    else:
+                        continue # Qiymət sütunu yoxdursa keç
+                    
+                    # Analiz məntiqi davam edir...
                     p_name, p_qty, fct = apply_special_logic(o_name, o_qty)
                     cost = (o_prc / o_qty) / fct if o_qty != 0 else 0
                     
@@ -124,6 +144,9 @@ with tab1:
                     if m_name:
                         mid = df_base[df_base['ad'] == m_name]['id'].values[0]
                         final_list.append({'ID': int(mid), 'QUANTITY': p_qty, 'COST': round(cost, 4)})
+                except Exception as e:
+                    # st.write(f"Sətir xətası: {e}") # Yoxlamaq üçün bunu aça bilərsən
+                    continueTITY': p_qty, 'COST': round(cost, 4)})
                 except:
                     continue
             
