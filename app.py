@@ -93,6 +93,7 @@ with st.sidebar.expander("⚙️ Bazanı Yenilə (Ehtiyac olarsa)"):
     st.file_uploader(f"{curr} - DK", type=["xlsx"], key=f"u_{curr}_dk")
 
 # --- ƏSAS PANEL ---
+# --- ƏSAS PANEL ---
 st.markdown(f"<h3 style='text-align: center;'>{curr} | Tədarük Sistemi</h3>", unsafe_allow_html=True)
 tab1, tab2 = st.tabs(["🚀 ANALİZ", "🔍 KONTROL"])
 
@@ -102,14 +103,16 @@ with tab1:
     cek = c2.file_uploader("📄 Sklad Çekini Yüklə", type=["xlsx"])
 
     if cek and st.button("⚡ Analizi Başlat"):
-       df_base = get_db(curr, cat)
+        df_base = get_db(curr, cat)
         if df_base is not None:
             df_c = pd.read_excel(cek)
-            # DİQQƏT: Bazadakı sütun adlarını kiçik hərflə çağırırıq
             final_list = []
+            
+            # Bazadakı sütun adlarını təyin edirik
+            base_ads = df_base['ad'].tolist() if 'ad' in df_base.columns else []
+            
             for _, row in df_c.iterrows():
                 try:
-                    # Sklad çekindəki sütun adları (Excel-də necədirsə elə qalır)
                     o_name = str(row['Ad'])
                     o_qty = float(row['Miqdar'])
                     o_prc = float(row['1 Vahid, ₼'])
@@ -117,61 +120,54 @@ with tab1:
                     p_name, p_qty, fct = apply_special_logic(o_name, o_qty)
                     cost = (o_prc / o_qty) / fct if o_qty != 0 else 0
                     
-                    # df_base['ad'] - burada 'ad' KİÇİK hərflə olmalıdır (get_db-də belə etmisən)
-                    m_name, _ = get_best_match(p_name, df_base['ad'].tolist())
-                    
+                    m_name, _ = get_best_match(p_name, base_ads)
                     if m_name:
-                        # df_base['id'] - burada 'id' KİÇİK hərflə olmalıdır
                         mid = df_base[df_base['ad'] == m_name]['id'].values[0]
                         final_list.append({'ID': int(mid), 'QUANTITY': p_qty, 'COST': round(cost, 4)})
-                except Exception as e:
+                except:
                     continue
             
             if final_list:
                 res_df = pd.DataFrame(final_list).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
+                st.success(f"Analiz tamamlandı! ({len(res_df)} məhsul tapıldı)")
                 st.dataframe(res_df, use_container_width=True)
+                
                 buf = io.BytesIO()
                 res_df.to_excel(buf, index=False)
-                st.download_button("📥 Endir", buf.getvalue(), f"{curr}_{cat}_{datetime.now().strftime('%Y%m%d')}.xlsx")
+                st.download_button("📥 Analiz Faylını Endir", buf.getvalue(), f"{curr}_{cat}_{datetime.now().strftime('%d%m%Y')}.xlsx")
             else:
-                st.warning("Heç bir məhsul eyniləşdirilmədi. Bazadakı adlarla çekdəki adlar uyğun gəlmir.")
+                st.warning("Heç bir məhsul bazadakı adlarla eyniləşdirilmədi.")
         else:
-            st.error(f"⚠️ {curr} üçün {cat} bazası tapılmadı!")
-            
-            if final_list:
-                res_df = pd.DataFrame(final_list).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
-                st.dataframe(res_df, use_container_width=True)
-                buf = io.BytesIO()
-                res_df.to_excel(buf, index=False)
-                st.download_button("📥 Endir", buf.getvalue(), f"{curr}_{cat}_{datetime.now().strftime('%Y%m%d')}.xlsx")
-            else:
-                st.warning("Heç bir məhsul eyniləşdirilmədi. Bazadakı adlarla çekdəki adlar uyğun gəlmir.")
-        else:
-            st.error(f"⚠️ {curr} üçün {cat} bazası tapılmadı!")
-            
-            if final_list:
-                res_df = pd.DataFrame(final_list).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
-                st.dataframe(res_df, use_container_width=True)
-                buf = io.BytesIO(); res_df.to_excel(buf, index=False)
-                st.download_button("📥 Endir", buf.getvalue(), f"{curr}_{cat}_{datetime.now().strftime('%Y%m%d')}.xlsx")
-            else: st.warning("Heç bir məhsul eyniləşdirilmədi.")
-        else: st.error("⚠️ Baza tapılmadı! GitHub-a faylı yüklədiyinizdən əmin olun.")
+            st.error(f"⚠️ {curr} üçün {cat} bazası GitHub-da tapılmadı!")
 
 with tab2:
-    st.markdown("#### Tapılmayan Məhsullar")
-    f_orig = st.file_uploader("Orijinal Çek", type=["xlsx"], key="ko")
-    f_bot = st.file_uploader("Analiz Faylı", type=["xlsx"], key="kb")
-    if f_orig and f_bot and st.button("🔍 Yoxla"):
-        df_o, df_b = pd.read_excel(f_orig), pd.read_excel(f_bot)
-        db = get_db(curr, "Horeca")
+    st.markdown("#### 🔍 Tapılmayan Məhsullar")
+    f_orig = st.file_uploader("Orijinal Sklad Çeki", type=["xlsx"], key="ko")
+    f_bot = st.file_uploader("Botun Verdiyi Analiz Faylı", type=["xlsx"], key="kb")
+    
+    if f_orig and f_bot and st.button("🔍 Siyahını Çıxar"):
+        df_o = pd.read_excel(f_orig)
+        df_b = pd.read_excel(f_bot)
+        db = get_db(curr, cat)
+        
         if db is not None:
             missing = []
+            db_ads = db['ad'].tolist()
             for _, row in df_o.iterrows():
-                name = str(row['Ad'])
-                p_name, _, _ = apply_special_logic(name, 1)
-                m_name, _ = get_best_match(p_name, db['Ad'].tolist(), threshold=80)
-                if m_name:
-                    tid = db[db['Ad'] == m_name]['id'].values[0]
-                    if int(tid) not in df_b['ID'].values: missing.append(name)
-                else: missing.append(f"{name} (Bazada yoxdur)")
-            st.table(pd.DataFrame(missing, columns=["Tapılmayanlar"]))
+                try:
+                    name = str(row['Ad'])
+                    p_name, _, _ = apply_special_logic(name, 1)
+                    m_name, _ = get_best_match(p_name, db_ads, threshold=80)
+                    
+                    if m_name:
+                        tid = db[db['ad'] == m_name]['id'].values[0]
+                        if int(tid) not in df_b['ID'].values:
+                            missing.append(name)
+                    else:
+                        missing.append(f"{name} (Bazada tapılmadı)")
+                except: continue
+            
+            if missing:
+                st.table(pd.DataFrame(missing, columns=["Analizə düşməyən məhsullar"]))
+            else:
+                st.success("Bütün məhsullar uğurla tapılıb!")
