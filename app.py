@@ -53,10 +53,20 @@ for res_opt in res_options:
 
 # Lokal bazaları yükləmə məntiqi (Online-da işləməsi üçün)
 def get_db(res_name, category):
+    # 1. Sidebar-dan yüklənən faylı yoxla
     key = f"u_{res_name}_{'h' if category == 'Horeca' else 'dk'}"
     uploaded_file = st.session_state.get(key)
+    
     if uploaded_file:
         return pd.read_excel(uploaded_file)
+    
+    # 2. Əgər yüklənməyibsə, GitHub-dakı (lokal) faylı axtar
+    suffix = "horeca" if category == "Horeca" else "dk"
+    local_filename = f"ana_{res_name.lower()}_{suffix}.xlsx"
+    
+    if os.path.exists(local_filename):
+        return pd.read_excel(local_filename)
+    
     return None
 
 # --- PANELLƏR ---
