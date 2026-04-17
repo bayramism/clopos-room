@@ -42,20 +42,19 @@ def get_best_match(query_name, choices, threshold=95):
     return None, 0
 
 def get_db(res_name, category):
-    def get_db(res_name, category):
-    # 1. Sidebar-dan əllə yüklənən faylı yoxla
+    # Bu sətir 4 boşluq sağdan başlamalıdır
     key = f"u_{res_name}_{'h' if category == 'Horeca' else 'dk'}"
     uploaded_file = st.session_state.get(key)
     if uploaded_file:
         return pd.read_excel(uploaded_file)
     
-    # 2. GitHub-dakı faylı tap (Horeca -> horeca, Dark Kitchen -> dk)
     suffix = "dk" if category == "Dark Kitchen" else "horeca"
     local_filename = f"ana_{res_name.lower()}_{suffix}.xlsx"
     
     if os.path.exists(local_filename):
         return pd.read_excel(local_filename)
     return None
+
 
 # --- SIDEBAR (Səliqəli Versiya) ---
 st.sidebar.markdown("### 🏢 RESTORAN SEÇİMİ")
