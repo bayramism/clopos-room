@@ -5,6 +5,7 @@ import io
 import re
 import os
 from datetime import datetime
+from openpyxl.styles import Font
 from rules import SPECIAL_RULES # Qaydaları digər fayldan çəkir
 
 st.set_page_config(page_title="ROOM CLOPOS Online", layout="wide")
@@ -117,6 +118,24 @@ def get_db(res_name, category):
     return None
 
 
+def build_export_file_name(restaurant, category):
+    category_tag = "horeca" if category == "Horeca" else "dk"
+    restaurant_tag = normalize_restaurant_name(restaurant).replace(" ", "_")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    return f"clopos_{restaurant_tag}_{category_tag}_{timestamp}.xlsx"
+
+
+def to_bold_excel_bytes(dataframe):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        dataframe.to_excel(writer, index=False, sheet_name="CLOPOS")
+        sheet = writer.sheets["CLOPOS"]
+        for cell in sheet[1]:
+            cell.font = Font(bold=True)
+    output.seek(0)
+    return output.getvalue()
+
+
 # --- SİDEBAR ---
 st.sidebar.markdown("#### 🏢 Restoran seçimi")
 res_options = discover_restaurants()
@@ -217,9 +236,9 @@ with tab1:
                 st.info(f"{errors} sətir format xətasına görə keçildi.")
 
             st.dataframe(res_df, use_container_width=True)
-            buf = io.BytesIO()
-            res_df.to_excel(buf, index=False)
-            st.download_button("📥 Endir", buf.getvalue(), f"{curr}_{datetime.now().strftime('%Y%m%d')}.xlsx")
+            export_name = build_export_file_name(curr, cat)
+            export_bytes = to_bold_excel_bytes(res_df)
+            st.download_button("📥 Endir", export_bytes, export_name)
         else:
             st.error("Uyğun ana baza tapılmadı. Repo daxilində fayl adı `ana_<restoran>_<horeca/dk>` formatında olmalıdır.")
 
