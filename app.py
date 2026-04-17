@@ -73,46 +73,75 @@ with tab1:
     cek_file = col2.file_uploader("Sklad Çekini Yüklə", type=["xlsx"])
 
     if cek_file and st.button("Analizi Başlat"):
-        # Target adını burada təyin edirik ki, xəta verməsin
-        target_file_prefix = f"ana_{curr.lower().replace('ı', 'i')}_{'dk' if cat == 'Dark Kitchen' else 'horeca'}"
-        
         df_base = get_db(curr, cat)
         if df_base is not None:
+            # 1. Çeki oxu və bütün sütun adlarını təmizlə
             df_cek = pd.read_excel(cek_file)
+            df_cek.columns = [str(c).strip().lower() for c in df_cek.columns]
+            
+            # 2. Bazadakı sütunları təmizlə
+            df_base.columns = [str(c).strip().lower() for c in df_base.columns]
+            
             final_data = []
+            # Bazadakı adlar siyahısı
             base_ads = df_base['ad'].tolist() if 'ad' in df_base.columns else []
             
-            # Çek sütunlarını tapırıq
-            c_cols = df_cek.columns.tolist()
-            price_col = next((c for c in c_cols if '1 Vahid' in str(c) or '₼' in str(c)), None)
+            # 3. Qiymət sütununu "ağıllı" axtarışla tap
+            price_col = next((c for c in df_cek.columns if any(k in c for k in ['vahid', '₼', 'qiym', 'price'])), None)
 
-            for _, row in df_cek.iterrows():
-                try:
-                    name, qty = str(row['Ad']), float(row['Miqdar'])
-                    price = float(row[price_col]) if price_col else 0
-                    
-                    # COST MƏNTİQİ (Qiymət / Miqdar) / Faktor
-                    p_name, p_qty, fct = apply_special_logic(name, qty)
-                    cost_val = (price / qty) / fct if qty != 0 else 0
-                    
-                    m_name, _ = get_best_match(p_name, base_ads)
-                    if m_name:
-                        mid = df_base[df_base['ad'] == m_name]['id'].values[0]
-                        final_data.append({'ID': int(mid), 'QUANTITY': p_qty, 'COST': round(cost_val, 4)})
-                except: continue
-
-            if final_data:
-                res_df = pd.DataFrame(final_data).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
-                st.success("Analiz tamamlandı!")
-                st.dataframe(res_df, use_container_width=True)
-                
-                buf = io.BytesIO()
-                res_df.to_excel(buf, index=False)
-                st.download_button("📥 Nəticəni Endir", buf.getvalue(), f"{curr}_{cat}.xlsx")
+            # Ekranda kiçik bir yoxlama göstərək (səhv olsa görəsən)
+            if not price_col:
+                st.error("Çekdə qiymət sütunu tapılmadı! Sütun adlarını yoxlayın.")
             else:
-                st.warning("Uyğun məhsul tapılmadı.")
-        else:
-            st.error(f"GitHub-da '{target_file_prefix}' ilə başlayan baza tapılmadı!")
+                for _, row in df_cek.iterrows():
+                    try:
+                        # Sütunları 'get' ilə götürürük ki, ad fərqinə ilişməsin
+                        name = str(row.get('ad', ''))
+                        qty = float(row.get('miqdar', 0))
+                        price = float(row[price_col])
+                        
+                        if not name or qty == 0: continue
 
-with tab2:
-    st.info("Tapılmayan məhsullar üçün analiz edin.")
+                        # 4. Maya dəyəri və Special Rules (Faktor) məntiqi
+                        p_name, p_qty, fct = apply_special_logic(name, qty)
+                        
+                        # Maya dəyəri hesablama düsturu
+                        cost_val = (price / qty) / fct if qty != 0 else 0
+                        
+                        # 5. Bazada məhsulu axtar (Oxşarlıq dərəcəsini 75% edirik)
+                        m_name, score = get_best_match(p_name, base_ads, threshold=75)
+                        
+                        if m_name:
+                            # Bazadakı orijinal ID-ni götür
+                            mid = df_base[df_base['ad'] == m_name]['id'].values[0]
+                            final_data.append({
+                                'ID': int(mid), 
+                                'QUANTITY': p_qty, 
+                                'COST': round(cost_val, 4)
+                            })
+                    except Exception as e:
+                        # Hansısa sətirdə ciddi xəta olsa, burada görəcəksən
+                        continue
+
+                # 6. Nəticələri qruplaşdır və göstər
+                if final_data:
+                    res_df = pd.DataFrame(final_data)
+                    # Eyni ID-li məhsulları cəmlə, qiymət ortalamasını götür
+                    res_df = res_df.groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
+                    
+                    st.success(f"Analiz tamamlandı! {len(res_df)} növ məhsul eyniləşdirildi.")
+                    st.dataframe(res_df, use_container_width=True)
+                    
+                    # Excel kimi endirmə düyməsi
+                    buf = io.BytesIO()
+                    res_df.to_excel(buf, index=False)
+                    st.download_button(
+                        label="📥 Nəticəni (.xlsx) Endir",
+                        data=buf.getvalue(),
+                        file_name=f"Analiz_{curr}_{cat}_{datetime.now().strftime('%d%m')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                else:
+                    st.warning("Uyğun məhsul tapılmadı. Baza ilə çekdəki adlar çox fərqlidir.")
+        else:
+            st.error(f"GitHub-da '{curr}' üçün '{cat}' bazası tapılmadı!")
