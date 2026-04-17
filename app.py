@@ -12,6 +12,8 @@ st.set_page_config(page_title="ROOM CLOPOS Online", layout="wide")
 
 if 'selected_res' not in st.session_state:
     st.session_state.selected_res = "ROOM"
+if "last_export" not in st.session_state:
+    st.session_state.last_export = None
 
 def normalize_text(text):
     if not text: return ""
@@ -238,9 +240,36 @@ with tab1:
             st.dataframe(res_df, use_container_width=True)
             export_name = build_export_file_name(curr, cat)
             export_bytes = to_bold_excel_bytes(res_df)
-            st.download_button("📥 Endir", export_bytes, export_name)
+            st.session_state.last_export = {
+                "restaurant": curr,
+                "category": cat,
+                "rows": len(res_df),
+                "file_name": export_name,
+                "file_bytes": export_bytes,
+                "preview_df": res_df,
+            }
+            st.success(f"Hazır fayl: `{export_name}`")
+            st.download_button("📥 Endir", export_bytes, export_name, key="download_current")
         else:
             st.error("Uyğun ana baza tapılmadı. Repo daxilində fayl adı `ana_<restoran>_<horeca/dk>` formatında olmalıdır.")
+
+    saved_export = st.session_state.get("last_export")
+    if saved_export:
+        st.markdown("---")
+        st.markdown("### Son hazırlanmış fayl")
+        st.write(
+            f"Restoran: **{saved_export['restaurant']}** | "
+            f"Sahə: **{saved_export['category']}** | "
+            f"Sətir sayı: **{saved_export['rows']}**"
+        )
+        st.write(f"Fayl adı: `{saved_export['file_name']}`")
+        st.dataframe(saved_export["preview_df"], use_container_width=True)
+        st.download_button(
+            "📥 Son faylı yenidən endir",
+            saved_export["file_bytes"],
+            saved_export["file_name"],
+            key="download_saved",
+        )
 
 with tab2:
     f_orig = st.file_uploader("1. Orijinal Çek", type=["xlsx"], key="ko")
