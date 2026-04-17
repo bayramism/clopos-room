@@ -42,26 +42,33 @@ def get_best_match(query_name, choices, threshold=95):
     return None, 0
 
 def get_db(res_name, category):
-    # 1. Sidebar-dan müvəqqəti yükləmə (həmişə üstündür)
+ # 1. Sidebar-dan yüklənən faylı yoxla
     key = f"u_{res_name}_{'h' if category == 'Horeca' else 'dk'}"
     uploaded_file = st.session_state.get(key)
     if uploaded_file:
         return pd.read_excel(uploaded_file)
     
-    # 2. GitHub-da yalnız müvafiq faylı axtar
-    # Horeca üçün 'horeca', Dark Kitchen üçün 'dk' suffix-i
+    # 2. GitHub-dakı faylı axtar
     suffix = "dk" if category == "Dark Kitchen" else "horeca"
-    target_start = f"ana_{res_name.lower()}_{suffix}"
+    
+    # Restoran adını normallaşdıraq (Həm Azərbaycan hərflərini, həm də boşluqları nəzərə alaq)
+    res_clean = res_name.lower().replace('ı', 'i').replace('ə', 'e').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u').strip()
+    
+    target_pattern = f"ana_{res_clean}_{suffix}"
     
     files = os.listdir('.')
     for f in files:
-        f_lower = f.lower()
-        # Faylın adı tam olaraq seçilən restoran və sahə ilə başlamalıdır
-        if f_lower.startswith(target_start):
-            if f_lower.endswith('.csv'):
-                return pd.read_csv(f)
-            elif f_lower.endswith('.xlsx'):
-                return pd.read_excel(f)
+        f_norm = f.lower().replace('ı', 'i').replace('ə', 'e').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+        
+        # Əgər faylın adı bizim axtardığımız pattern ilə başlayırsa
+        if f_norm.startswith(target_pattern):
+            try:
+                if f.lower().endswith('.csv'):
+                    return pd.read_csv(f)
+                elif f.lower().endswith('.xlsx'):
+                    return pd.read_excel(f)
+            except Exception as e:
+                st.error(f"Faylı oxuyarkən xəta: {e}")
                 
     return None
 
