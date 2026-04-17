@@ -110,18 +110,17 @@ cek_file = col2.file_uploader("Sklad Çekini Yüklə", type=["xlsx"])
 # --- 2. SAHƏ: ANALİZ MOTORU (TOXUNULMAZ HİSSƏ) ---
 if cek_file and st.button("⚡ Analizi Başlat"):
     df_base = get_db(curr, cat)
-    
     if df_base is not None:
         df_cek = pd.read_excel(cek_file)
         df_cek.columns = [str(c).strip().lower() for c in df_cek.columns]
         df_base.columns = [str(c).strip().lower() for c in df_base.columns]
         
-        final_data = []      # Excel üçün (ID, QTY, COST)
-        missing_data = []    # Kontrol üçün (Adlar)
+        final_data = []
+        missing_data = []
         base_ads = df_base['ad'].tolist()
+        # Qiymət sütununu axtar
         price_col = next((c for c in df_cek.columns if any(k in c for k in ['vahid', '₼', 'qiym'])), None)
 
-        # Hər bir sətiri tək-tək analiz edirik
         for _, row in df_cek.iterrows():
             try:
                 name = str(row.get('ad', '')).strip()
@@ -129,41 +128,31 @@ if cek_file and st.button("⚡ Analizi Başlat"):
                 price = float(row[price_col]) if price_col else 0
                 if not name or qty == 0: continue
 
-                # Sənin o 91% nəticə verən işləyən məntiqlərin
+                # Riyazi hesablama və Ad eyniləşdirmə
                 p_name, p_qty, fct = apply_special_logic(name, qty)
                 cost_val = (price / qty) / fct if qty != 0 else 0
-                m_name, score = get_best_match(p_name, base_ads)
+                m_name, _ = get_best_match(p_name, base_ads)
                 
                 if m_name:
-                    # Tapıldısa final siyahıya at
+                    # ID-ni ana bazadan çək
                     mid = df_base[df_base['ad'] == m_name]['id'].values[0]
                     final_data.append({'ID': int(mid), 'QUANTITY': p_qty, 'COST': round(cost_val, 4)})
                 else:
-                    # Tapılmadısa KONTROL siyahısına at
-                    missing_data.append({"Çekdəki Ad": name, "Status": "Bazada tapılmadı"})
-            except:
-                continue
+                    missing_data.append({"Məhsul": name, "Status": "Bazada yoxdur"})
+            except: continue
 
-        # --- 3. SAHƏ: ANALİZİN NƏTİCƏSİ (ÜST HİSSƏ) ---
+        # Nəticələri birbaşa ekrana çıxar
         if final_data:
-            st.success(f"✅ {len(final_data)} məhsul eyniləşdi.")
             res_df = pd.DataFrame(final_data).groupby('ID').agg({'QUANTITY':'sum', 'COST':'mean'}).reset_index()
-            st.dataframe(res_df, use_container_width=True)
             
+            st.write("### ✅ Analiz Nəticəsi")
+            st.dataframe(res_df)
+            
+            # Faylı yarat və düyməni qoy
             buf = io.BytesIO()
             res_df.to_excel(buf, index=False)
-            st.download_button("📥 Faylı Endir", buf.getvalue(), f"{curr}_Analiz.xlsx")
-        
-        # --- 4. SAHƏ: KONTROL HESABATI (ALT HİSSƏ) ---
-        # Bu hissə sadəcə analizdən artanları sənə göstərir
-        if missing_data:
-            st.markdown("---")
-            st.subheader("🔍 Kontrol (Tapılmayan Məhsullar)")
-            st.warning(f"Aşağıdakı {len(missing_data)} məhsul eyniləşmədi. Onları bazada yoxlayın:")
-            st.table(pd.DataFrame(missing_data))
-        else:
-            st.success("Təbriklər! Bütün məhsullar eyniləşdi.")
-            
-    else:
-        st.error("Baza tapılmadı!")
+            st.download_button("📥 Faylı Endir", buf.getvalue(), "analiz.xlsx")
 
+        if missing_data:
+            st.write("### 🔍 Kontrol (Tapılmayanlar)")
+            st.table(pd.DataFrame(missing_data))
