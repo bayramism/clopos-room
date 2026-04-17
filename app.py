@@ -4,100 +4,25 @@ from fuzzywuzzy import process, fuzz
 import io
 import re
 import os
-from rules import SPECIAL_RULES
+from datetime import datetime
+from rules import SPECIAL_RULES # Qaydaları digər fayldan çəkir
 
-st.set_page_config(page_title="CLOPOS AI Analiz", layout="wide")
+st.set_page_config(page_title="ROOM CLOPOS Online", layout="wide")
 
-
-# --- 1. MƏNTİQİ FUNKSİYALAR ---
+if 'selected_res' not in st.session_state:
+    st.session_state.selected_res = "ROOM"
 
 def normalize_text(text):
-    if not text:
-        return ""
+    if not text: return ""
     text = str(text).lower().strip()
-
-    # Azərbaycan → latın
-    az_map = {
-        'ç': 'c', 'ə': 'e', 'ğ': 'g', 'ı': 'i',
-        'i̇': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u'
-    }
-    for k, v in az_map.items():
-        text = text.replace(k, v)
-
-    # Mötərizəli vahidləri sil: (ed), (kg), (kq), (lt), (qr), (gr), (ml), (l)
     text = re.sub(r'\(\s*(?:ed|kg|kq|lt|qr|gr|ml|l)\s*\)', '', text)
-
-    # Faiz, ölçü, xüsusi simvolları sil — bunlar matching-ə mane olur
-    text = re.sub(r'\d+\s*%', '', text)        # "33%", "3.5 %" → sil
-    text = re.sub(r'\d+[\.,]\d+', '', text)    # "1.5", "2,5" kimi rəqəmləri sil
-    text = re.sub(r'\b\d+\b', '', text)        # tək rəqəmləri sil
-    text = re.sub(r'[^\w\s]', ' ', text)       # tire, nöqtə, vergül → boşluq
-
+    text = re.sub(r'\d+\s*%', '', text)
+    text = re.sub(r'\d+[\.,]\d+', '', text)
+    text = re.sub(r'\b\d+\b', '', text)
+    text = re.sub(r'[^\w\s]', ' ', text)
+    text = text.replace('neü', 'new').replace('c', 'k').replace('w', 'v').replace('x', 'ks')
+    text = text.replace('ç', 'c').replace('ə', 'e').replace('ğ', 'g').replace('ı', 'i').replace('ö', 'o').replace('ş', 's').replace('ü', 'u')
     return " ".join(text.split())
-
-
-def get_best_match(query_name, choices, threshold=72):
-    """
-    Çoxmərhələli fuzzy matching:
-    1. Tam eyniləşdirmə (normalizasiya edilmiş)
-    2. Token Set Ratio  — söz sırasına baxmır
-    3. Token Sort Ratio — sıranı düzəldib müqayisə edir
-    4. Partial Ratio    — qısaldılmış adlar üçün
-    """
-    if not choices:
-        return None, 0
-
-    q_norm = normalize_text(query_name)
-
-    # MƏRHƏLƏ 1 — Tam eynilik
-    for choice in choices:
-        if q_norm == normalize_text(choice):
-            return choice, 100
-
-    # Seçimləri əvvəlcədən normalizasiya et (bir dəfə)
-    norm_choices = {c: normalize_text(c) for c in choices}
-
-    # MƏRHƏLƏ 2 — Token Set Ratio (söz sırası fərqinə tab gətirir)
-    # "Qaymaq Petmol" ↔ "Petmol Qaymaq" → 100
-    best_ts, score_ts = process.extractOne(
-        q_norm,
-        norm_choices,
-        scorer=fuzz.token_set_ratio
-    )
-    # extractOne norm dict üzərindədir, orijinal key-i qaytar
-    best_ts_orig = [k for k, v in norm_choices.items() if v == best_ts][0] if best_ts in norm_choices.values() else best_ts
-
-    if score_ts >= 88:
-        return best_ts_orig, score_ts
-
-    # MƏRHƏLƏ 3 — Token Sort Ratio
-    best_tsr, score_tsr = process.extractOne(
-        q_norm,
-        norm_choices,
-        scorer=fuzz.token_sort_ratio
-    )
-    best_tsr_orig = [k for k, v in norm_choices.items() if v == best_tsr][0] if best_tsr in norm_choices.values() else best_tsr
-
-    if score_tsr >= 85:
-        return best_tsr_orig, score_tsr
-
-    # MƏRHƏLƏ 4 — Partial Ratio (çekdə qısaldılmış ad: "Qaymaq" ↔ "Qaymaq Petmol 33%")
-    best_pr, score_pr = process.extractOne(
-        q_norm,
-        norm_choices,
-        scorer=fuzz.partial_ratio
-    )
-    best_pr_orig = [k for k, v in norm_choices.items() if v == best_pr][0] if best_pr in norm_choices.values() else best_pr
-
-    if score_pr >= 80:
-        return best_pr_orig, score_pr
-
-    # Heç biri keçmədi — ən yaxşı token_set nəticəsini threshold ilə ver
-    if score_ts >= threshold:
-        return best_ts_orig, score_ts
-
-    return None, 0
-
 
 def apply_special_logic(name, qty):
     n_norm = normalize_text(name)
@@ -106,140 +31,162 @@ def apply_special_logic(name, qty):
             return val[0], qty * val[1], val[1]
     return name, qty, 1
 
+def get_best_match(query_name, choices, threshold=95):
+    if not choices:
+        return None, 0
 
+    q_norm = normalize_text(query_name)
+
+    for choice in choices:
+        if q_norm == normalize_text(choice):
+            return choice, 100
+
+    normalized_choices = [normalize_text(c) for c in choices]
+    norm_to_original = {}
+    for original, normalized in zip(choices, normalized_choices):
+        norm_to_original.setdefault(normalized, original)
+
+    best = process.extractOne(q_norm, normalized_choices, scorer=fuzz.token_set_ratio)
+    if not best:
+        return None, 0
+
+    best_norm = best[0]
+    score = best[1]
+    best_match = norm_to_original.get(best_norm)
+    if best_match:
+        m_norm = normalize_text(best_match)
+        q_words = [w for w in q_norm.split() if len(w) > 2]
+        if q_words and not any(w in m_norm for w in q_words):
+            return None, 0
+        return (best_match, score) if score >= threshold else (None, 0)
+
+    return None, 0
+
+
+def standardize_columns(df):
+    renamed = {}
+    for col in df.columns:
+        key = normalize_text(col)
+        if key == "ad":
+            renamed[col] = "ad"
+        elif "miqdar" in key:
+            renamed[col] = "miqdar"
+        elif any(k in key for k in ["vahid", "qiym", "azn", "₼"]):
+            renamed[col] = "price"
+        elif key == "id":
+            renamed[col] = "id"
+    return df.rename(columns=renamed)
+
+# --- SİDEBAR ---
+st.sidebar.markdown("#### 📁 ANA BAZALAR")
+res_options = ["ROOM", "BİBLİOTEKA", "FİNESTRA"]
+for res_opt in res_options:
+    with st.sidebar.expander(f"🏢 {res_opt}", expanded=(st.session_state.selected_res == res_opt)):
+        if st.button(f"Seç {res_opt}", key=f"btn_{res_opt}"):
+            st.session_state.selected_res = res_opt
+            st.rerun()
+        st.file_uploader("Horeca", type=["xlsx"], key=f"u_{res_opt}_h")
+        st.file_uploader("DK", type=["xlsx"], key=f"u_{res_opt}_dk")
+
+# Lokal bazaları yükləmə məntiqi (Online-da işləməsi üçün)
 def get_db(res_name, category):
-    sfx = "dk" if category == "Dark Kitchen" else "horeca"
-    res_clean = (
-        res_name.lower()
-        .replace('ı', 'i')
-        .replace('i̇', 'i')
-        .strip()
-    )
-    target = f"ana_{res_clean}_{sfx}"
-
-    for f in os.listdir('.'):
-        f_norm = f.lower().replace('ı', 'i').replace('i̇', 'i')
-        if f_norm.startswith(target):
-            try:
-                return pd.read_excel(f) if f.endswith('.xlsx') else pd.read_csv(f)
-            except Exception:
-                continue
+    key = f"u_{res_name}_{'h' if category == 'Horeca' else 'dk'}"
+    uploaded_file = st.session_state.get(key)
+    if uploaded_file:
+        return pd.read_excel(uploaded_file)
     return None
 
-
-# --- 2. SIDEBAR ---
-
-if 'selected_res' not in st.session_state:
-    st.session_state.selected_res = "ROOM"
-
-st.sidebar.title("🏢 Restoranlar")
-for res in ["ROOM", "BİBLİOTEKA", "FİNESTRA"]:
-    label = f"{res} ✅" if st.session_state.selected_res == res else res
-    if st.sidebar.button(label, use_container_width=True):
-        st.session_state.selected_res = res
-        st.rerun()
-
+# --- PANELLƏR ---
 curr = st.session_state.selected_res
+st.markdown(f"<h3 style='text-align: center;'>{curr} | Online Panel</h3>", unsafe_allow_html=True)
+tab1, tab2 = st.tabs(["🚀 ANALİZ", "🔍 KONTROL"])
 
+with tab1:
+    col_a, col_b = st.columns(2)
+    cat = col_a.selectbox("Sahə:", ["Horeca", "Dark Kitchen"])
+    cek = col_b.file_uploader("📄 Sklad Çekini Yüklə", type=["xlsx"])
 
-# --- 3. ANA PANEL ---
+    if cek and st.button("⚡ Başlat"):
+        df_base = get_db(curr, cat)
+        if df_base is not None:
+            df_c = pd.read_excel(cek)
+            df_c = standardize_columns(df_c)
+            df_base = standardize_columns(df_base)
 
-st.markdown(f"### 📊 {curr} Paneli")
+            required_cek = {"ad", "miqdar"}
+            required_base = {"ad", "id"}
+            if not required_cek.issubset(set(df_c.columns)):
+                st.error("Çek faylında `Ad` və `Miqdar` sütunları tapılmadı.")
+                st.stop()
+            if not required_base.issubset(set(df_base.columns)):
+                st.error("Baza faylında `Ad` və `id` sütunları tapılmadı.")
+                st.stop()
 
-c1, c2 = st.columns(2)
-cat = c1.selectbox("Analiz Sahəsi:", ["Horeca", "Dark Kitchen"])
-cek_file = c2.file_uploader("Faylı seç", type=["xlsx"])
+            final_list = []
+            errors = 0
+            choices = df_base["ad"].astype(str).tolist()
+            for _, row in df_c.iterrows():
+                try:
+                    o_name = str(row.get("ad", "")).strip()
+                    o_qty = float(row.get("miqdar", 0))
+                    o_prc = float(row.get("price", 0))
+                    if not o_name or o_qty == 0:
+                        continue
 
-if cek_file and st.button("⚡ Analizi Başlat"):
-    db_df = get_db(curr, cat)
+                    p_name, p_qty, fct = apply_special_logic(o_name, o_qty)
+                    cost = (o_prc / o_qty) / fct if o_qty != 0 else 0
+                    m_name, _ = get_best_match(p_name, choices, threshold=80)
+                    if m_name:
+                        mid = df_base[df_base["ad"] == m_name]["id"].values[0]
+                        final_list.append(
+                            {
+                                "ID": int(mid),
+                                "QUANTITY": p_qty,
+                                "COST": round(cost, 4),
+                                "LINE_TOTAL": round(p_qty * cost, 4),
+                            }
+                        )
+                except (ValueError, TypeError, KeyError):
+                    errors += 1
+                    continue
 
-    if db_df is None:
-        st.error("❌ Baza tapılmadı! Fayl adını yoxlayın.")
-        st.stop()
+            if not final_list:
+                st.warning("Uyğun məhsul tapılmadı. Bazanı və çek sütunlarını yoxlayın.")
+                st.stop()
 
-    df_cek = pd.read_excel(cek_file)
-    df_base = db_df
+            res_df = (
+                pd.DataFrame(final_list)
+                .groupby("ID", as_index=False)
+                .agg({"QUANTITY": "sum", "LINE_TOTAL": "sum"})
+            )
+            res_df["COST"] = (res_df["LINE_TOTAL"] / res_df["QUANTITY"]).round(4)
+            res_df = res_df[["ID", "QUANTITY", "COST"]]
 
-    # Sütun adlarını standartlaşdır
-    df_cek.columns  = [str(c).strip().lower() for c in df_cek.columns]
-    df_base.columns = [str(c).strip().lower() for c in df_base.columns]
+            st.success(f"{len(res_df)} məhsul hazırlandı.")
+            if errors:
+                st.info(f"{errors} sətir format xətasına görə keçildi.")
 
-    base_ads  = df_base['ad'].tolist()
-    price_col = next(
-        (c for c in df_cek.columns if any(k in c for k in ['vahid', '₼', 'qiym'])),
-        None
-    )
+            st.dataframe(res_df, use_container_width=True)
+            buf = io.BytesIO()
+            res_df.to_excel(buf, index=False)
+            st.download_button("📥 Endir", buf.getvalue(), f"{curr}_{datetime.now().strftime('%Y%m%d')}.xlsx")
+        else: st.error("Sidebar-dan müvafiq bazanı yükləyin!")
 
-    found_rows   = []   # Tapılanlar
-    missing_rows = []   # Tapılmayanlar
-    low_conf_rows = []  # Aşağı inamla tapılanlar (manual yoxlama üçün)
-
-    progress = st.progress(0, text="Analiz gedir...")
-    total = len(df_cek)
-
-    for idx, (_, row) in enumerate(df_cek.iterrows()):
-        try:
-            nm = str(row.get('ad', '')).strip()
-            mq = float(row.get('miqdar', 0))
-            pr = float(row[price_col]) if price_col else 0
-
-            if not nm or mq == 0:
-                continue
-
-            p_nm, p_mq, fct = apply_special_logic(nm, mq)
-            cst = (pr / mq) / fct if mq != 0 else 0
-            m_nm, score = get_best_match(p_nm, base_ads)
-
-            if m_nm:
-                real_id = df_base[df_base['ad'] == m_nm]['id'].values[0]
-                found_rows.append({
-                    'ID':       int(real_id),
-                    'QUANTITY': p_mq,
-                    'COST':     round(cst, 4)
-                })
-                # 72–79 aralığını aşağı inamlı kimi qeyd et
-                if score < 80:
-                    low_conf_rows.append({
-                        "Çekdəki ad":  nm,
-                        "Uyğun tapılan": m_nm,
-                        "Oxşarlıq (%)": score
-                    })
-            else:
-                missing_rows.append({"Məhsul": nm, "Status": "Bazada yoxdur"})
-
-        except Exception:
-            continue
-
-        progress.progress((idx + 1) / total, text=f"Analiz gedir... {idx+1}/{total}")
-
-    progress.empty()
-
-    # --- NƏTİCƏLƏR ---
-
-    if found_rows:
-        res_df = (
-            pd.DataFrame(found_rows)
-            .groupby('ID')
-            .agg({'QUANTITY': 'sum', 'COST': 'mean'})
-            .reset_index()
-        )
-        st.success(f"✅ {len(res_df)} unikal məhsul hazırlandı.")
-        st.dataframe(res_df, use_container_width=True)
-
-        buf = io.BytesIO()
-        res_df.to_excel(buf, index=False)
-        st.download_button("📥 Faylı Endir", buf.getvalue(), "analiz.xlsx")
-
-    # Aşağı inamlı uyğunlaşmalar — istifadəçi özü yoxlasın
-    if low_conf_rows:
-        with st.expander(f"⚠️ {len(low_conf_rows)} məhsul — aşağı inamlı uyğunlaşma (yoxlayın)"):
-            st.dataframe(pd.DataFrame(low_conf_rows), use_container_width=True)
-
-    # Tapılmayanlar
-    if missing_rows:
-        st.markdown("---")
-        st.warning(f"🔍 {len(missing_rows)} məhsul bazada tapılmadı")
-        st.table(pd.DataFrame(missing_rows))
-
-    if not found_rows and not missing_rows:
-        st.info("Faylda emal ediləcək sətir tapılmadı.")
+with tab2:
+    f_orig = st.file_uploader("1. Orijinal Çek", type=["xlsx"], key="ko")
+    f_bot = st.file_uploader("2. Analiz Faylı", type=["xlsx"], key="kb")
+    if f_orig and f_bot and st.button("🔍 Yoxla"):
+        df_o, df_b = pd.read_excel(f_orig), pd.read_excel(f_bot)
+        db = get_db(curr, "Horeca")
+        if db is not None:
+            missing = []
+            for _, row in df_o.iterrows():
+                name = str(row['Ad'])
+                p_name, _, _ = apply_special_logic(name, 1)
+                m_name, _ = get_best_match(p_name, db['Ad'].tolist(), threshold=80)
+                if m_name:
+                    tid = db[db['Ad'] == m_name]['id'].values[0]
+                    if int(tid) not in df_b['ID'].values: missing.append(name)
+                else: missing.append(f"{name} (Bazada yoxdur)")
+            st.table(pd.DataFrame(missing, columns=["Tapılmayanlar"]))
+        else: st.error("Baza yüklənməyib!")
