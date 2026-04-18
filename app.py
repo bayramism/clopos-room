@@ -45,6 +45,27 @@ def normalize_text(text):
     return " ".join(text.split())
 
 
+def normalize_text_loose(text):
+    """Rəqəmləri silmir — SKU/kod tipli adlar üçün; çek ilə baza fərqli olanda əsas xilaskar."""
+    if not text:
+        return ""
+    text = str(text).lower().strip()
+    text = re.sub(r"\(\s*(?:ed|kg|kq|lt|qr|gr|ml|l)\s*\)", "", text)
+    text = re.sub(r"\d+\s*%", "", text)
+    text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
+    text = (
+        text.replace("ç", "c")
+        .replace("ə", "e")
+        .replace("ğ", "g")
+        .replace("ı", "i")
+        .replace("ö", "o")
+        .replace("ş", "s")
+        .replace("ü", "u")
+        .replace("i̇", "i")
+    )
+    return " ".join(text.split())
+
+
 def apply_special_logic(name, qty):
     n_norm = normalize_text(name)
     for key, val in SPECIAL_RULES.items():
@@ -57,38 +78,40 @@ def _fuzz_proc(x):
     return normalize_text(str(x))
 
 
+def _fuzz_loose(x):
+    return normalize_text_loose(str(x))
+
+
 def _soft_word_gate(q_norm, m_norm, score):
     q_words = [w for w in q_norm.split() if len(w) > 2]
-    if not q_words or score >= 86:
+    if not q_words or score >= 80:
         return True
     if any(w in m_norm for w in q_words):
         return True
-    return fuzz.partial_ratio(q_norm, m_norm) >= 70
+    return fuzz.partial_ratio(q_norm, m_norm) >= 58
 
 
-def get_best_match(query_name, choices, threshold=68):
-    """Bazadakı orijinal `ad` sətirləri ilə işləyir; rapidfuzz `processor` eyni addan bir neçə
-    normallaşdırma olduqda səhv seçimi azaldır."""
+def _match_with_processor(q_raw, choices, threshold, proc_fn):
     if not choices:
         return None, 0
 
-    q = str(query_name).strip()
+    q = str(q_raw).strip()
     if not q or q.lower() == "nan":
         return None, 0
 
-    q_norm = _fuzz_proc(q)
+    q_norm = proc_fn(q)
     if not q_norm:
         return None, 0
 
     for choice in choices:
-        if _fuzz_proc(choice) == q_norm:
+        if proc_fn(choice) == q_norm:
             return str(choice), 100.0
 
     best = process.extractOne(
         q,
         choices,
         scorer=fuzz.token_set_ratio,
-        processor=_fuzz_proc,
+        processor=proc_fn,
     )
     if not best:
         return None, 0
@@ -98,13 +121,13 @@ def get_best_match(query_name, choices, threshold=68):
 
     if score < threshold:
         best2 = process.extractOne(
-            q, choices, scorer=fuzz.WRatio, processor=_fuzz_proc
+            q, choices, scorer=fuzz.WRatio, processor=proc_fn
         )
         if best2 and float(best2[1]) >= threshold:
             best_match = str(best2[0])
             score = float(best2[1])
 
-    m_norm = _fuzz_proc(best_match)
+    m_norm = proc_fn(best_match)
     if not _soft_word_gate(q_norm, m_norm, score):
         return None, score
 
@@ -114,15 +137,25 @@ def get_best_match(query_name, choices, threshold=68):
     return best_match, score
 
 
-def explain_match(query_name, choices, limit=5):
+def get_best_match(query_name, choices, threshold=68):
+    """Əvvəl sıx normallaşdırma; keçmirsə rəqəmləri saxlayan «loose» + bir az aşağı hədd."""
+    r = _match_with_processor(query_name, choices, threshold, _fuzz_proc)
+    if r[0]:
+        return r
+    loose_thr = max(55, int(threshold) - 7)
+    return _match_with_processor(query_name, choices, loose_thr, _fuzz_loose)
+
+
+def explain_match(query_name, choices, limit=5, processor=None):
     q = str(query_name).strip()
     if not choices or not q:
         return []
+    proc = processor if processor is not None else _fuzz_proc
     return process.extract(
         q,
         choices,
         scorer=fuzz.token_set_ratio,
-        processor=_fuzz_proc,
+        processor=proc,
         limit=limit,
     )
 
@@ -240,10 +273,10 @@ with tab1:
     cat = col_a.selectbox("Sahə:", ["Horeca", "Dark Kitchen"])
     match_thr = col_c.slider(
         "Uyğunluq həddi (%) — aşağı = daha çox sətir keçər, risk artar",
-        min_value=55,
+        min_value=50,
         max_value=92,
-        value=68,
-        help="Heç uyğun gəlmirsə 60–65 sına; yenə zəifdirsə aşağıdakı diaqnostika cədvəlinə bax.",
+        value=62,
+        help="Heç uyğun gəlmirsə 55–60 sına. Kod indi «loose» ikinci mərhələ də işlədir (rəqəmli adlar).",
     )
     cek = col_b.file_uploader("📄 Sklad Çekini Yüklə", type=["xlsx"])
 
@@ -305,6 +338,9 @@ with tab1:
                     else:
                         errors += 1
                         hits = explain_match(p_name, choices, limit=5)
+                        hits_l = explain_match(
+                            p_name, choices, limit=3, processor=_fuzz_loose
+                        )
                         row_dbg = {
                             "Çekdə ad": o_name,
                             "Qaydadan sonra": p_name,
@@ -312,6 +348,8 @@ with tab1:
                             "Xal": round(float(hits[0][1]), 1) if hits else "",
                             "2-ci": hits[1][0] if len(hits) > 1 else "",
                             "2 xal": round(float(hits[1][1]), 1) if len(hits) > 1 else "",
+                            "Loose 1": hits_l[0][0] if hits_l else "",
+                            "Loose xal": round(float(hits_l[0][1]), 1) if hits_l else "",
                         }
                         fail_debug.append(row_dbg)
                 except (ValueError, TypeError, KeyError) as ex:
@@ -361,6 +399,8 @@ with tab1:
                                 "Xal": "xal_1",
                                 "2-ci": "en_yaxin_2",
                                 "2 xal": "xal_2",
+                                "Loose 1": "loose_1",
+                                "Loose xal": "loose_xal",
                             }
                         )
                     )
