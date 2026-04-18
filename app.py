@@ -84,14 +84,14 @@ def _fuzz_loose(x):
 
 def _soft_word_gate(q_norm, m_norm, score):
     q_words = [w for w in q_norm.split() if len(w) > 2]
-    if not q_words or score >= 80:
+    if not q_words or score >= 76:
         return True
     if any(w in m_norm for w in q_words):
         return True
-    return fuzz.partial_ratio(q_norm, m_norm) >= 58
+    return fuzz.partial_ratio(q_norm, m_norm) >= 52
 
 
-def _match_with_processor(q_raw, choices, threshold, proc_fn):
+def _match_with_processor(q_raw, choices, threshold, proc_fn, skip_word_gate=False):
     if not choices:
         return None, 0
 
@@ -128,7 +128,7 @@ def _match_with_processor(q_raw, choices, threshold, proc_fn):
             score = float(best2[1])
 
     m_norm = proc_fn(best_match)
-    if not _soft_word_gate(q_norm, m_norm, score):
+    if not skip_word_gate and not _soft_word_gate(q_norm, m_norm, score):
         return None, score
 
     if score < threshold:
@@ -138,12 +138,19 @@ def _match_with_processor(q_raw, choices, threshold, proc_fn):
 
 
 def get_best_match(query_name, choices, threshold=68):
-    """Əvvəl sıx normallaşdırma; keçmirsə rəqəmləri saxlayan «loose» + bir az aşağı hədd."""
+    """Sıx → loose → son çarə (daha aşağı hədd, söz süzgəci olmadan)."""
     r = _match_with_processor(query_name, choices, threshold, _fuzz_proc)
     if r[0]:
         return r
-    loose_thr = max(55, int(threshold) - 7)
-    return _match_with_processor(query_name, choices, loose_thr, _fuzz_loose)
+    loose_thr = max(52, int(threshold) - 7)
+    r = _match_with_processor(query_name, choices, loose_thr, _fuzz_loose)
+    if r[0]:
+        return r
+    # Heç biri keçmirsə: ən yaxın variantı yalnız xalla qəbul et (səhv uyğun riski var, amma boş qalmır)
+    last_thr = max(32, int(threshold) - 26)
+    return _match_with_processor(
+        query_name, choices, last_thr, _fuzz_loose, skip_word_gate=True
+    )
 
 
 def explain_match(query_name, choices, limit=5, processor=None):
@@ -183,9 +190,14 @@ def standardize_columns(df):
     for col in df.columns:
         key = normalize_text(col)
         col_l = str(col).lower()
-        if key == "ad":
+        if key == "ad" or "mehsul" in key or "nomenkl" in key or key in ("mal", "title", "name"):
             renamed[col] = "ad"
-        elif "miqdar" in key:
+        elif (
+            "miqdar" in key
+            or "kemiyyat" in key
+            or key in ("say", "qty", "qty.")
+            or "eded" in key
+        ):
             renamed[col] = "miqdar"
         elif "umumi" in key or ("maya" in key and "dey" in key):
             renamed[col] = "line_total_src"
@@ -305,8 +317,8 @@ with tab1:
         "Uyğunluq həddi (%) — aşağı = daha çox sətir keçər, risk artar",
         min_value=50,
         max_value=92,
-        value=62,
-        help="Heç uyğun gəlmirsə 55–60 sına. Kod indi «loose» ikinci mərhələ də işlədir (rəqəmli adlar).",
+        value=58,
+        help="Son çarə mərhələ avtomatikdir; yenə azdırsa sürgünü 50–55ə sal.",
     )
     cek = col_b.file_uploader("📄 Sklad Çekini Yüklə", type=["xlsx"])
 
