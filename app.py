@@ -206,9 +206,10 @@ def to_bold_excel_bytes(dataframe):
 
 
 def _first_id_for_name(df_base, m_name):
-    sub = df_base.loc[df_base["ad"] == m_name, "id"]
+    m = str(m_name).strip()
+    sub = df_base.loc[df_base["ad"].astype(str).str.strip() == m, "id"]
     if sub.empty:
-        raise KeyError("no id")
+        raise KeyError(f"id tapılmadı: {m!r}")
     return int(sub.iloc[0])
 
 
@@ -252,7 +253,6 @@ with tab1:
             df_c = pd.read_excel(cek)
             df_c = standardize_columns(df_c)
             df_base = standardize_columns(df_base)
-            df_base = df_base.drop_duplicates(subset=["ad"], keep="first")
 
             required_cek = {"ad", "miqdar"}
             required_base = {"ad", "id"}
@@ -263,21 +263,33 @@ with tab1:
                 st.error("Baza faylında `Ad` və `id` sütunları tapılmadı.")
                 st.stop()
 
+            # choices strip olunur; df_base["ad"] də eyni olmalıdır — əks halda id tapılmır
+            df_c["ad"] = df_c["ad"].astype(str).str.strip()
+            df_base["ad"] = df_base["ad"].astype(str).str.strip()
+            df_base["id"] = pd.to_numeric(df_base["id"], errors="coerce")
+            df_base = df_base.dropna(subset=["id", "ad"])
+            df_base["id"] = df_base["id"].astype(int)
+            df_base = df_base.drop_duplicates(subset=["ad"], keep="first")
+
             final_list = []
             errors = 0
-            choices = df_base["ad"].astype(str).str.strip().tolist()
+            choices = df_base["ad"].tolist()
             fail_debug = []
             for _, row in df_c.iterrows():
+                o_name = ""
+                p_name = ""
                 try:
                     o_name = str(row.get("ad", "")).strip()
+                    if not o_name or o_name.lower() in ("nan", "none"):
+                        continue
                     o_qty = float(row.get("miqdar", 0))
                     o_prc = float(row.get("price", 0))
-                    if not o_name or o_qty == 0:
+                    if o_qty == 0:
                         continue
 
                     p_name, p_qty, fct = apply_special_logic(o_name, o_qty)
                     cost = (o_prc / o_qty) / fct if o_qty != 0 else 0
-                    m_name, got_score = get_best_match(
+                    m_name, _score = get_best_match(
                         p_name, choices, threshold=match_thr
                     )
                     if m_name:
@@ -302,8 +314,18 @@ with tab1:
                             "2 xal": round(float(hits[1][1]), 1) if len(hits) > 1 else "",
                         }
                         fail_debug.append(row_dbg)
-                except (ValueError, TypeError, KeyError):
+                except (ValueError, TypeError, KeyError) as ex:
                     errors += 1
+                    fail_debug.append(
+                        {
+                            "Çekdə ad": o_name,
+                            "Qaydadan sonra": p_name,
+                            "Ən yaxın (token_set)": f"(xəta) {type(ex).__name__}",
+                            "Xal": "",
+                            "2-ci": str(ex)[:120],
+                            "2 xal": "",
+                        }
+                    )
                     continue
 
             if not final_list:
@@ -422,6 +444,10 @@ with tab2:
         db = get_db(curr, ctrl_cat)
         if db is not None:
             db = standardize_columns(db)
+            db["ad"] = db["ad"].astype(str).str.strip()
+            db["id"] = pd.to_numeric(db["id"], errors="coerce")
+            db = db.dropna(subset=["id", "ad"])
+            db["id"] = db["id"].astype(int)
             db = db.drop_duplicates(subset=["ad"], keep="first")
             if "id" not in df_b.columns:
                 st.error("Analiz faylında `ID` / `id` sütunu tapılmadı.")
