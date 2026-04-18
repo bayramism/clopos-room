@@ -160,17 +160,41 @@ def explain_match(query_name, choices, limit=5, processor=None):
     )
 
 
+def parse_az_number(val):
+    """Excel AZ formatı: vergül onluq (1,135), boşluqlu minlik nadir."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return 0.0
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        return float(val)
+    s = str(val).strip().replace("\u00a0", " ")
+    if not s or s.lower() in ("nan", "none", "-", "—"):
+        return 0.0
+    s = s.replace(" ", "").replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
 def standardize_columns(df):
     df = df.copy()
     df.columns = [str(c).strip().lstrip("\ufeff") for c in df.columns]
     renamed = {}
     for col in df.columns:
         key = normalize_text(col)
+        col_l = str(col).lower()
         if key == "ad":
             renamed[col] = "ad"
         elif "miqdar" in key:
             renamed[col] = "miqdar"
-        elif any(k in key for k in ["vahid", "qiym", "azn", "₼"]):
+        elif "umumi" in key or ("maya" in key and "dey" in key):
+            renamed[col] = "line_total_src"
+        elif key == "vahid" and "₼" not in col_l and "azn" not in col_l:
+            # Yalnız ölçü vahidi (kg/pcs) — qiymət deyil
+            renamed[col] = "unit_kind"
+        elif "vahid" in key and ("₼" in col_l or "azn" in col_l or "qiym" in key):
+            renamed[col] = "price"
+        elif any(k in key for k in ["qiym", "azn"]) or "₼" in col_l:
             renamed[col] = "price"
         elif key == "id":
             renamed[col] = "id"
@@ -269,6 +293,12 @@ st.markdown(
 tab1, tab2 = st.tabs(["🚀 ANALİZ", "🔍 KONTROL"])
 
 with tab1:
+    st.caption(
+        "Mexanizm: çekdəki **Ad** ilə ana bazada **eyni məhsul adı** tapılır → export **ID** "
+        "yalnız bazadandır. **QUANTITY** = çek miqdarı (xüsusi qayda varsa çevrilmiş miqdar). "
+        "**COST** = çekdə **1 vahid ₼** (sətirin ümumi miqdarına görə qiymət) **÷ Miqdar** "
+        "= **bir vahidin qiyməti** (toplama yox, bölmə). Clopos faylında bu dəyər lazımdır."
+    )
     col_a, col_b, col_c = st.columns([1, 1, 1])
     cat = col_a.selectbox("Sahə:", ["Horeca", "Dark Kitchen"])
     match_thr = col_c.slider(
@@ -298,6 +328,9 @@ with tab1:
 
             # choices strip olunur; df_base["ad"] də eyni olmalıdır — əks halda id tapılmır
             df_c["ad"] = df_c["ad"].astype(str).str.strip()
+            for _col in ("miqdar", "price"):
+                if _col in df_c.columns:
+                    df_c[_col] = df_c[_col].map(parse_az_number)
             df_base["ad"] = df_base["ad"].astype(str).str.strip()
             df_base["id"] = pd.to_numeric(df_base["id"], errors="coerce")
             df_base = df_base.dropna(subset=["id", "ad"])
@@ -315,13 +348,15 @@ with tab1:
                     o_name = str(row.get("ad", "")).strip()
                     if not o_name or o_name.lower() in ("nan", "none"):
                         continue
-                    o_qty = float(row.get("miqdar", 0))
-                    o_prc = float(row.get("price", 0))
+                    o_qty = parse_az_number(row.get("miqdar", 0))
+                    unit_price = parse_az_number(row.get("price", 0))
                     if o_qty == 0:
                         continue
 
-                    p_name, p_qty, fct = apply_special_logic(o_name, o_qty)
-                    cost = (o_prc / o_qty) / fct if o_qty != 0 else 0
+                    p_name, p_qty, _fct = apply_special_logic(o_name, o_qty)
+                    # Çekdəki «1 vahid ₼» = həmin sətirdəki ümumi miqdarın qiyməti → Clopos üçün
+                    # bir vahidin qiyməti: həmin məbləğ ÷ çek miqdarı (fct yalnız miqdarı dəyişir, COST-a vurulmur).
+                    cost = (unit_price / o_qty) if o_qty != 0 else 0
                     m_name, _score = get_best_match(
                         p_name, choices, threshold=match_thr
                     )
