@@ -1,9 +1,15 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 REM === Source and target folders ===
-REM SRC: burada kod üzərində işlədiyin “iş masası” qovluğu
-set "SRC=C:\Users\bayra\OneDrive\Desktop\Clopos_online"
+REM Default: skript repo kökündədirsə, buradan işlə (Clopos_online artıq istifadə olunmaya bilər)
+set "SRC=%~dp0"
+
+REM Əgər hələ də ayrıca “iş masası” qovluğundan kopyalamaq istəyirsənsə, bunu aktiv et:
+REM   set "USE_LEGACY_SRC=1"
+if "%USE_LEGACY_SRC%"=="1" (
+  set "SRC=C:\Users\bayra\OneDrive\Desktop\Clopos_online"
+)
 
 REM DST: GitHub repo-nun LOCAL qovluğu (GitHub adı ilə eyni olmalı deyil)
 REM İstəsən özün dəqiq yolu buraya yaza bilərsən:
@@ -28,7 +34,7 @@ for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd_HH-m
 set "MSG=auto sync %TS%"
 
 echo.
-echo [0/6] Checking paths...
+echo [0/7] Checking paths...
 if not exist "%SRC%\" (
   echo ERROR: Source folder not found:
   echo   %SRC%
@@ -54,13 +60,18 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [1/6] Copying files...
-call :copy_one "%SRC%\app.py" "%DST%\app.py" || exit /b 1
-call :copy_one "%SRC%\rules.py" "%DST%\rules.py" || exit /b 1
-call :copy_one "%SRC%\requirements.txt" "%DST%\requirements.txt" || exit /b 1
-call :copy_one "%SRC%\ana_biblioteka_horeca.xlsx" "%DST%\ana_biblioteka_horeca.xlsx" || exit /b 1
+echo [1/7] Syncing tracked files into repo...
+REM Əgər SRC və DST eynidirsə, copy lazım deyil
+if /I not "%SRC%"=="%DST%" (
+  call :copy_one "%SRC%\app.py" "%DST%\app.py" || exit /b 1
+  call :copy_one "%SRC%\rules.py" "%DST%\rules.py" || exit /b 1
+  call :copy_one "%SRC%\requirements.txt" "%DST%\requirements.txt" || exit /b 1
+  call :copy_one "%SRC%\ana_biblioteka_horeca.xlsx" "%DST%\ana_biblioteka_horeca.xlsx" || exit /b 1
+) else (
+  echo SRC == DST, skipping copy step.
+)
 
-echo [2/6] Repo sanity check...
+echo [2/7] Repo sanity check...
 git -C "%DST%" rev-parse --is-inside-work-tree >nul 2>&1
 if errorlevel 1 (
   echo ERROR: %DST% is not a git repository (.git missing).
@@ -73,7 +84,7 @@ echo   %DST%
 echo git remote:
 git -C "%DST%" remote -v
 
-echo [3/6] Staging changes...
+echo [3/7] Staging changes...
 git -C "%DST%" add app.py rules.py requirements.txt ana_biblioteka_horeca.xlsx
 if errorlevel 1 (
   echo ERROR: git add failed.
@@ -81,25 +92,48 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [4/6] Checking if there is anything to commit...
+echo [4/7] Checking staged changes...
 git -C "%DST%" diff --cached --quiet
-if errorlevel 1 (
-  echo Changes detected. Committing...
-) else (
-  echo Nothing to commit (no changes after copy). Skipping commit/push.
-  pause
-  exit /b 0
+set "HAS_STAGED=0"
+if errorlevel 1 set "HAS_STAGED=1"
+
+echo [5/7] Checking if local branch is ahead of remote...
+set "AHEAD_LINE="
+for /f "usebackq delims=" %%L in (`git -C "%DST%" status -sb`) do (
+  set "AHEAD_LINE=%%L"
+  goto :have_status
+)
+:have_status
+set "IS_AHEAD=0"
+echo %AHEAD_LINE% | findstr /I "\[ahead" >nul
+if not errorlevel 1 set "IS_AHEAD=1"
+
+if "%HAS_STAGED%"=="0" (
+  if "%IS_AHEAD%"=="0" (
+    echo Nothing to commit and nothing to push.
+    pause
+    exit /b 0
+  ) else (
+    echo No new staged changes, but you have unpushed commits. Pushing...
+    goto :do_push
+  )
 )
 
-echo [5/6] Committing...
+echo [6/7] Committing...
 git -C "%DST%" commit -m "%MSG%"
 if errorlevel 1 (
+  REM "nothing to commit" bəzən errorlevel 1 qaytarır. Əgər ahead-dırsa yenə push edək.
+  if "%IS_AHEAD%"=="1" (
+    echo Commit reported an error, but branch is ahead. Continuing to push...
+    goto :do_push
+  )
   echo ERROR: git commit failed.
   pause
   exit /b 1
 )
 
-echo [6/6] Pushing to GitHub...
+:do_push
+echo [7/7] Pushing to GitHub...
 git -C "%DST%" push
 if errorlevel 1 (
   echo Push failed. Check git remote/auth.
