@@ -53,41 +53,83 @@ def apply_special_logic(name, qty):
     return name, qty, 1
 
 
-def get_best_match(query_name, choices, threshold=80):
+def _fuzz_proc(x):
+    return normalize_text(str(x))
+
+
+def _soft_word_gate(q_norm, m_norm, score):
+    q_words = [w for w in q_norm.split() if len(w) > 2]
+    if not q_words or score >= 86:
+        return True
+    if any(w in m_norm for w in q_words):
+        return True
+    return fuzz.partial_ratio(q_norm, m_norm) >= 70
+
+
+def get_best_match(query_name, choices, threshold=68):
+    """Bazadakı orijinal `ad` sətirləri ilə işləyir; rapidfuzz `processor` eyni addan bir neçə
+    normallaşdırma olduqda səhv seçimi azaldır."""
     if not choices:
         return None, 0
 
-    q_norm = normalize_text(query_name)
+    q = str(query_name).strip()
+    if not q or q.lower() == "nan":
+        return None, 0
+
+    q_norm = _fuzz_proc(q)
+    if not q_norm:
+        return None, 0
 
     for choice in choices:
-        if q_norm == normalize_text(choice):
-            return choice, 100
-
-    normalized_choices = [normalize_text(c) for c in choices]
-    norm_to_original = {}
-    for original, normalized in zip(choices, normalized_choices):
-        norm_to_original.setdefault(normalized, original)
+        if _fuzz_proc(choice) == q_norm:
+            return str(choice), 100.0
 
     best = process.extractOne(
-        q_norm, normalized_choices, scorer=fuzz.token_set_ratio
+        q,
+        choices,
+        scorer=fuzz.token_set_ratio,
+        processor=_fuzz_proc,
     )
     if not best:
         return None, 0
 
-    best_norm = best[0]
-    score = best[1]
-    best_match = norm_to_original.get(best_norm)
-    if best_match:
-        m_norm = normalize_text(best_match)
-        q_words = [w for w in q_norm.split() if len(w) > 2]
-        if q_words and not any(w in m_norm for w in q_words):
-            return None, 0
-        return (best_match, score) if score >= threshold else (None, 0)
+    best_match = str(best[0])
+    score = float(best[1])
 
-    return None, 0
+    if score < threshold:
+        best2 = process.extractOne(
+            q, choices, scorer=fuzz.WRatio, processor=_fuzz_proc
+        )
+        if best2 and float(best2[1]) >= threshold:
+            best_match = str(best2[0])
+            score = float(best2[1])
+
+    m_norm = _fuzz_proc(best_match)
+    if not _soft_word_gate(q_norm, m_norm, score):
+        return None, score
+
+    if score < threshold:
+        return None, score
+
+    return best_match, score
+
+
+def explain_match(query_name, choices, limit=5):
+    q = str(query_name).strip()
+    if not choices or not q:
+        return []
+    return process.extract(
+        q,
+        choices,
+        scorer=fuzz.token_set_ratio,
+        processor=_fuzz_proc,
+        limit=limit,
+    )
 
 
 def standardize_columns(df):
+    df = df.copy()
+    df.columns = [str(c).strip().lstrip("\ufeff") for c in df.columns]
     renamed = {}
     for col in df.columns:
         key = normalize_text(col)
@@ -193,8 +235,15 @@ st.markdown(
 tab1, tab2 = st.tabs(["🚀 ANALİZ", "🔍 KONTROL"])
 
 with tab1:
-    col_a, col_b = st.columns(2)
+    col_a, col_b, col_c = st.columns([1, 1, 1])
     cat = col_a.selectbox("Sahə:", ["Horeca", "Dark Kitchen"])
+    match_thr = col_c.slider(
+        "Uyğunluq həddi (%) — aşağı = daha çox sətir keçər, risk artar",
+        min_value=55,
+        max_value=92,
+        value=68,
+        help="Heç uyğun gəlmirsə 60–65 sına; yenə zəifdirsə aşağıdakı diaqnostika cədvəlinə bax.",
+    )
     cek = col_b.file_uploader("📄 Sklad Çekini Yüklə", type=["xlsx"])
 
     if cek and st.button("⚡ Başlat"):
@@ -216,7 +265,8 @@ with tab1:
 
             final_list = []
             errors = 0
-            choices = df_base["ad"].astype(str).tolist()
+            choices = df_base["ad"].astype(str).str.strip().tolist()
+            fail_debug = []
             for _, row in df_c.iterrows():
                 try:
                     o_name = str(row.get("ad", "")).strip()
@@ -227,7 +277,9 @@ with tab1:
 
                     p_name, p_qty, fct = apply_special_logic(o_name, o_qty)
                     cost = (o_prc / o_qty) / fct if o_qty != 0 else 0
-                    m_name, _ = get_best_match(p_name, choices, threshold=75)
+                    m_name, got_score = get_best_match(
+                        p_name, choices, threshold=match_thr
+                    )
                     if m_name:
                         mid = _first_id_for_name(df_base, m_name)
                         final_list.append(
@@ -240,6 +292,16 @@ with tab1:
                         )
                     else:
                         errors += 1
+                        hits = explain_match(p_name, choices, limit=5)
+                        row_dbg = {
+                            "Çekdə ad": o_name,
+                            "Qaydadan sonra": p_name,
+                            "Ən yaxın (token_set)": hits[0][0] if hits else "",
+                            "Xal": round(float(hits[0][1]), 1) if hits else "",
+                            "2-ci": hits[1][0] if len(hits) > 1 else "",
+                            "2 xal": round(float(hits[1][1]), 1) if len(hits) > 1 else "",
+                        }
+                        fail_debug.append(row_dbg)
                 except (ValueError, TypeError, KeyError):
                     errors += 1
                     continue
@@ -261,6 +323,35 @@ with tab1:
                 if not sample.empty:
                     st.markdown("İlk 10 çek adı (baza ilə vizual müqayisə üçün):")
                     st.dataframe(sample, use_container_width=True)
+                if fail_debug:
+                    dbg_df = pd.DataFrame(fail_debug)
+                    with st.expander(
+                        "Diaqnostika: hər sətir üçün bazadan ən yaxın 2 variant (xal aşağıdırsa həddi sal)",
+                        expanded=True,
+                    ):
+                        st.dataframe(dbg_df, use_container_width=True)
+                    dbg_bytes = to_bold_excel_bytes(
+                        dbg_df.rename(
+                            columns={
+                                "Çekdə ad": "cek_ad",
+                                "Qaydadan sonra": "qayda_sonra",
+                                "Ən yaxın (token_set)": "en_yaxin_1",
+                                "Xal": "xal_1",
+                                "2-ci": "en_yaxin_2",
+                                "2 xal": "xal_2",
+                            }
+                        )
+                    )
+                    st.download_button(
+                        "📥 Diaqnostika cədvəlini Excel kimi endir",
+                        dbg_bytes,
+                        f"clopos_diag_{curr}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        key="download_diag",
+                    )
+                st.caption(
+                    "Əsas export yalnız ən azı bir sətir uğurla uyğunlaşanda çıxır. "
+                    "Yuxarıdakı sürgü ilə həddi azaldıb ⚡ Başlat-a yenidən bas."
+                )
                 st.stop()
 
             res_df = (
@@ -340,7 +431,9 @@ with tab2:
             for _, row in df_o.iterrows():
                 name = str(row.get("ad", ""))
                 p_name, _, _ = apply_special_logic(name, 1)
-                m_name, _ = get_best_match(p_name, db["ad"].tolist(), threshold=80)
+                m_name, _ = get_best_match(
+                    p_name, db["ad"].astype(str).str.strip().tolist(), threshold=72
+                )
                 if m_name:
                     tid = _first_id_for_name(db, m_name)
                     if tid not in bot_ids:
